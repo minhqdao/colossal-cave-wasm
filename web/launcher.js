@@ -346,11 +346,10 @@ let preserveTerminalScrollOnFocus = false;
 function focusTerminalInput({ preserveScroll = false, force = false } = {}) {
   if (!waitingForInput) return;
   if (document.activeElement === terminalInput) {
-    // Tapping never changes the active element when an earlier focus() -- iOS
-    // accepts it outside a gesture but shows no keyboard -- is already there,
-    // so a plain re-focus would be a no-op. Blur first: within the tap
-    // gesture the following focus() then really is an activation and iOS
-    // opens the keyboard.
+    // iOS can leave the field focused without ever showing the soft
+    // keyboard. Re-focusing it then does nothing, so on a tap (a real
+    // gesture) blur first: the following focus() is an activation again
+    // and iOS opens the keyboard.
     if (!force || !needsSoftKeyboardFocus()) return;
     terminalInput.blur();
   }
@@ -383,8 +382,8 @@ function restoreTerminalAfterVisibilityChange() {
   // Re-request focus on touch devices too: the field is likely still focused
   // from before the tab was hidden, but iOS drops the keyboard while hidden
   // and a focus event that does not change anything will not bring it back.
-  // The tap itself re-focuses with force on pointerdown; this call only
-  // refreshes the caret and re-arms the keyboard-constraint checks.
+  // The tap itself re-focuses on click; this call only refreshes the caret
+  // and re-arms the keyboard-constraint checks.
   focusTerminalInput({ preserveScroll: true });
 }
 
@@ -393,8 +392,14 @@ let terminalPointerInteraction = false;
 function handleTerminalClick() {
   // A click is also fired after dragging to select text. Refocusing the hidden
   // input here would collapse the range the user just created.
+  const followsTouch = clickFollowsTouch;
+  clickFollowsTouch = false;
   if (!hasTextSelection(window.getSelection())) {
-    focusTerminalInput();
+    // On touch devices the keyboard only rises for focus() calls inside a
+    // gesture handler, and `click` is one that browsers suppress whenever the
+    // finger moved (scroll drag, selection pan) -- unlike `pointerdown`,
+    // which fires for every touch.
+    focusTerminalInput({ force: followsTouch });
   } else {
     render();
   }
@@ -402,11 +407,12 @@ function handleTerminalClick() {
 }
 
 let touchMouseEventPending = false;
+let clickFollowsTouch = false;
 
 function handleTerminalPointerDown(event) {
   terminalPointerInteraction = true;
   touchMouseEventPending = isTouchPointer(event);
-  if (touchMouseEventPending) focusTerminalInput({ force: true });
+  if (touchMouseEventPending) clickFollowsTouch = true;
 }
 
 function handleTerminalPointerCancel() {
