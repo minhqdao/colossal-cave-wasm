@@ -1,16 +1,18 @@
-# Colossal Cave Adventure (FORTRAN IV → WebAssembly)
+# Colossal Cave Adventure (WebAssembly Build)
 
 [![CI](https://img.shields.io/github/actions/workflow/status/minhqdao/colossal-cave-wasm/ci.yml?logo=github&label=CI)](https://github.com/minhqdao/colossal-cave-wasm/actions/workflows/ci.yml)
 [![Play online](https://img.shields.io/website?url=https%3A%2F%2Fminhqdao.github.io%2Fcolossal-cave-wasm%2F&logo=webassembly&label=play%20online)](https://minhqdao.github.io/colossal-cave-wasm/)
-[![License](https://img.shields.io/github/license/minhqdao/colossal-cave-wasm)](LICENSE)
+[![License](https://img.shields.io/github/license/minhqdao/colossal-cave-wasm?shields-are-a-joke)](LICENSE)
 
-Colossal Cave Adventure is the original text adventure game, written in FORTRAN IV by Will Crowther in 1976 and expanded by Don Woods in 1977.
+Colossal Cave Adventure is widely regarded as the seminal text adventure game, originally written in FORTRAN IV by Will Crowther in 1976 and expanded by Don Woods in 1977.
 
-The code is based on the 1977-03-31 sources preserved (together with the game database `adventure.dat`) in the [wh0am1-dev/adventure](https://github.com/wh0am1-dev/adventure) repository.
+The code is based on the 1977-03-31 sources, preserved together with the game database `adventure.dat` in the [wh0am1-dev/adventure](https://github.com/wh0am1-dev/adventure) repository.
 
 The goal of this project is to explore Fortran-to-WebAssembly compilation using modern Fortran compilers such as LFortran and LLVM Flang. The game is built with LFortran and Emscripten and runs entirely in the browser — [play it online](https://minhqdao.github.io/colossal-cave-wasm/).
 
 ## Changes to the 1977 Source
+
+<details> <summary>Show</summary>
 
 The port keeps the original program structure, statements and data statements; only what modern compilers reject was changed:
 
@@ -30,9 +32,11 @@ The port keeps the original program structure, statements and data statements; o
 
 Platform shims (in `src/adventure_shims.f`): `IFILE` locates and opens `adventure.dat`, `ADVRAN` implements the Park–Miller minimal-standard generator (TOPS-10 style, seeded with 1 exactly like the original), and `GETLIN`/`NXTINT` provide line/token reading for the loader.
 
+</details>
+
 ## Native Build
 
-Make sure either `gfortran`, `lfortran`, or `flang` are installed on your system. Other compilers may work as well but have not been tested.
+Install `gfortran`, `lfortran`, or `flang`. Other compilers may work as well but have not been tested.
 
 ### gfortran
 
@@ -42,7 +46,7 @@ gfortran src/adventure.f src/adventure_shims.f -o adventure
 
 ### lfortran
 
-LFortran emits identical per-file helper symbols into every object file, which collide when the two source files are compiled and linked separately. Build them as one compilation unit:
+LFortran emits identical helper symbols for both source files, causing linker conflicts when they are compiled separately. Combine them into a single compilation unit:
 
 ```bash
 mkdir -p build && cat src/adventure.f src/adventure_shims.f > build/adventure_all.f
@@ -55,7 +59,7 @@ lfortran --fixed-form --implicit-interface --implicit-typing build/adventure_all
 flang src/adventure.f src/adventure_shims.f -o adventure
 ```
 
-Start the game by running the executable from the repository root (it looks for `adventure.dat` in the working directory, then in `src/`):
+Start the game from the repository root. The executable looks for `adventure.dat` in the working directory and then in `src/`:
 
 ```bash
 ./adventure
@@ -65,21 +69,21 @@ Start the game by running the executable from the repository root (it looks for 
 
 ### Prebuilt Artifacts
 
-`web/adventure.js` and `web/adventure.wasm` are committed for convenience so you can run the web version without installing the toolchain; they were generated with LFortran 0.65.0 and Emscripten 6.0.8. The game database is embedded in the module. You can proceed to [Run Web Server](#run-web-server).
+`web/adventure.js` and `web/adventure.wasm` are committed for convenience, allowing you to run the web version without installing the toolchain. They were built with LFortran 0.65.0 and Emscripten 6.0.8, embedding the game database directly in the WebAssembly module.
 
-### Local WASM Build
+### Local WebAssembly Build
 
-The WebAssembly build requires [LFortran](https://lfortran.org/) and [Emscripten](https://emscripten.org/). Install LFortran (e.g. with `conda install -c conda-forge lfortran`) and Emscripten, and make sure `lfortran` and `emcc` are on your `PATH`. The build is known to work with LFortran 0.65.0 and Emscripten 6.0.8, but other recent versions should work as well.
+The WebAssembly build requires [LFortran](https://lfortran.org/) and [Emscripten](https://emscripten.org/). Install both and make sure `lfortran` and `emcc` are on your `PATH`. The build is known to work with LFortran 0.65.0 and Emscripten 6.0.8; other recent versions should work as well.
 
 ```bash
 scripts/build-web.sh
 ```
 
-The script compiles the port with `lfortran` (single compilation unit, see above) and links with `emcc`, embedding `src/adventure.dat` into the module and emitting `web/adventure.js` and `web/adventure.wasm`.
+The script compiles the port with `lfortran` and links it with `emcc`, embedding `src/adventure.dat` and generating `web/adventure.js` and `web/adventure.wasm`.
 
 ### Run Web Server
 
-To play the game, start a local web server with [Node.js](https://nodejs.org/en/download/):
+To play the game, start the included local web server:
 
 ```bash
 node scripts/dev-server.mjs 8080
@@ -87,28 +91,19 @@ node scripts/dev-server.mjs 8080
 
 Then open http://localhost:8080 in your browser.
 
-## Tests
+## Checks
 
-`scripts/run-tests.mjs` runs a regression suite of scripted game sessions (65 scenarios) against the WebAssembly build and asserts on the transcripts, plus synchronous invariant checks on the launcher/worker input-buffer protocol: the instructions prompt, `HELP`, unknown/truncated/lowercase input, bare verbs, object and lamp handling, the grate lock state machine, the `XYZZY`/`PLUGH` magic words, darkness and non-fatal pit falls, the bird puzzle, dwarf encounters and the 1976 quirks that come with them. Because the game is fully deterministic (the rng seed is a fixed `DATA` constant), even rng-driven events are reproducible and asserted directly. The suite also requires the wasm transcript to be identical to a native gfortran build's.
-
-```bash
-node scripts/run-tests.mjs               # wasm + native parity (needs gfortran)
-node scripts/run-tests.mjs --no-parity   # wasm only
-node scripts/run-tests.mjs grate         # only tests whose name matches
-```
-
-CI additionally runs the suite natively against each compiler of the build matrix (`ADVENTURE_NATIVE=./adventure node scripts/run-tests.mjs --native-only`).
-
-## Typecheck
-
-`scripts/typecheck.sh` type-checks the hand-written `// @ts-check` sources in `web/`, the same command CI runs.
+Run the test suite and typecheck with:
 
 ```bash
+node scripts/run-tests.mjs
 scripts/typecheck.sh
 ```
 
+The test suite runs scripted game sessions against the WebAssembly build and checks their transcripts against a native gfortran build. `--no-parity` skips the native comparison, and a test name can be passed to run a subset of scenarios.
+
 ## License
 
-The original FORTRAN source of Colossal Cave Adventure was written by Will Crowther (1976) and extended by Don Woods (1977). It was distributed without a license notice and is widely treated as public domain (see the [wh0am1-dev/adventure](https://github.com/wh0am1-dev/adventure) repository for details); this repository makes no copyright claim on the original game source or its database file.
+The original FORTRAN source of Colossal Cave Adventure was written by Will Crowther (1976) and extended by Don Woods (1977). It was distributed without a license notice and is widely treated as public domain. The source in this repository was obtained from [wh0am1-dev/adventure](https://github.com/wh0am1-dev/adventure); this repository makes no copyright claim on the original game source or its database file.
 
 All additions in this repository — the source patches, runtime shims (`IFILE`, `ADVRAN`, `GETLIN`/`NXTINT`), build scripts, web launcher and CI — are licensed under the [ISC License](LICENSE).
