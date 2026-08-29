@@ -2,7 +2,7 @@
 
 [![CI](https://img.shields.io/github/actions/workflow/status/minhqdao/colossal-cave-wasm/ci.yml?logo=github&label=CI)](https://github.com/minhqdao/colossal-cave-wasm/actions/workflows/ci.yml)
 [![Play online](https://img.shields.io/website?url=https%3A%2F%2Fminhqdao.github.io%2Fcolossal-cave-wasm%2F&logo=webassembly&label=play%20online)](https://minhqdao.github.io/colossal-cave-wasm/)
-[![License](https://img.shields.io/github/license/minhqdao/colossal-cave-wasm)](LICENSE)
+[![License](https://img.shields.io/github/license/minhqdao/colossal-cave-wasm?i-hate-shields)](LICENSE)
 
 Colossal Cave Adventure is widely regarded as the seminal text adventure game, originally written in FORTRAN IV by Will Crowther in 1976 and expanded by Don Woods in 1977.
 
