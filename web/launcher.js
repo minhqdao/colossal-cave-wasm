@@ -424,20 +424,48 @@ let sharedBuffer;
 let sharedKeys;
 const isolationReloadKey = "adventure-isolation-reload";
 
+// The coi service worker performs its own reloads: the first-visit reload
+// once it controls the page, and a degrade reload when COEP credentialless
+// fails. This helper covers only the gap coi leaves on a fresh first
+// visit (worker registered but not yet controlling the page) with one
+// guarded reload; both systems guard with sessionStorage, so the page
+// reloads at most once per system per session -- never in a loop.
 async function ensureCrossOriginIsolation() {
   if (window.crossOriginIsolated) {
     sessionStorage.removeItem(isolationReloadKey);
     return true;
   }
 
+  if (typeof SharedArrayBuffer === "undefined") {
+    throw new Error(
+      "This browser does not support SharedArrayBuffer, which the game needs to handle input.",
+    );
+  }
+
   if (!navigator.serviceWorker) return false;
 
-  try {
-    await navigator.serviceWorker.ready;
-  } catch {
+  // serviceWorker.ready stays pending forever when no registration can
+  // exist (e.g. Safari private browsing rejects them), which would hang
+  // the launcher on LOADING...; fail fast instead.
+  const ready = await Promise.race([
+    navigator.serviceWorker.ready.then(() => true),
+    new Promise((resolve) => setTimeout(() => resolve(false), 5_000)),
+  ]);
+  if (!ready) return false;
+
+  if (navigator.serviceWorker.controller) {
+    // coi is serving this page and handles its own degradation. Give its
+    // in-flight reload a moment to navigate before declaring failure.
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    if (window.crossOriginIsolated) {
+      sessionStorage.removeItem(isolationReloadKey);
+      return true;
+    }
     return false;
   }
 
+  // Registered but not controlling yet: reload once so coi's fetch
+  // handler can add the isolation headers to the page itself.
   if (!sessionStorage.getItem(isolationReloadKey)) {
     sessionStorage.setItem(isolationReloadKey, "1");
     window.location.reload();
@@ -454,7 +482,9 @@ async function start() {
   if (isIsolated === undefined) return;
   if (!isIsolated) {
     throw new Error(
-      "Interactive input needs cross-origin isolation (COOP and COEP headers).",
+      "The game could not start: cross-origin isolation is unavailable " +
+        "(this happens in private browsing or when service workers are " +
+        "blocked). Try a regular tab, or reload the page.",
     );
   }
 
@@ -559,6 +589,14 @@ function launchWorker(buffer, keys, currentRunId, attempt = 0) {
 }
 
 window.addEventListener("pagehide", releaseWorker, { once: true });
+
+// iOS Safari frequently restores tabs from the back/forward cache with the
+// game worker already terminated, leaving a frozen terminal. Restart cleanly
+// when such a restore is detected.
+window.addEventListener("pageshow", (event) => {
+  if (!event.persisted) return;
+  restartGame();
+});
 
 function reportStartError(error) {
   releaseWorker();

@@ -29,11 +29,10 @@
       Worker that runs the WASM module, which requires cross-origin isolation.
       The coi-serviceworker.js (MIT, by Guido Zuidhof and contributors) registers
       a service worker that supplies the COOP/COEP response headers so this
-      works from any static server (and file:// is not supported).
+      works from any static server (and file:// is not supported). It prefers
+      COEP: credentialless and degrades to require-corp where needed; all
+      resources here are same-origin, so both modes are safe.
     -->
-    <script>
-      window.coi = { coepCredentialless: () => false };
-    </script>
     <script src="./coi-serviceworker.js"></script>
     <style>
       * {
