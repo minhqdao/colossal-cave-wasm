@@ -61,11 +61,11 @@ LAMP_16 = [
     "................",
     "................",
     ".......#........",
-    ".......#.......#",
+    ".......#........",
     ".....#####.....#",
     "..#########...##",
     ".#.############.",
-    ".#############..",
+    ".##############.",
     ".#############..",
     "..###########...",
     "....########....",
@@ -140,8 +140,20 @@ def grid_to_ico_bytes(grids):
                 pixels += bytes((b, g, r, 0xFF))
         mask_row = bytes(((w + 31) // 32) * 4)  # AND mask rows, padded to 32 bit
         and_mask = mask_row * h
-        header = struct.pack("<IiiHHIIiiII", 40, w, 2 * h, 1, 32, 0,
-                             len(pixels) + len(and_mask), 0, 0, 0, 0)
+        header = struct.pack(
+            "<IiiHHIIiiII",
+            40,
+            w,
+            2 * h,
+            1,
+            32,
+            0,
+            len(pixels) + len(and_mask),
+            0,
+            0,
+            0,
+            0,
+        )
         images.append(header + bytes(pixels) + and_mask)
 
     out = struct.pack("<HHH", 0, 1, len(images))  # ICONDIR: reserved, type, count
