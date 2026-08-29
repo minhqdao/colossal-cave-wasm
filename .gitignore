@@ -1,0 +1,15 @@
+.DS_Store
+
+.vscode/
+.idea/
+
+build/
+*.mod
+*.bc
+*.ll
+*.out
+*.exe
+
+/adventure
+/adventure.js
+/adventure.wasm

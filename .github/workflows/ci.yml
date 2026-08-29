@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler:
+          - gfortran
+          - lfortran
+          - flang
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Fortran
+        uses: minhqdao/setup-fortran@v1
+        with:
+          compiler: ${{ matrix.compiler }}
+
+      - name: Build (gfortran)
+        if: matrix.compiler == 'gfortran'
+        run: gfortran src/adventure.f src/adventure_shims.f -o adventure
+
+      - name: Build (lfortran)
+        if: matrix.compiler == 'lfortran'
+        run: |
+          mkdir -p build
+          cat src/adventure.f src/adventure_shims.f > build/adventure_all.f
+          lfortran --fixed-form --implicit-interface --implicit-typing build/adventure_all.f -o adventure
+
+      - name: Build (flang)
+        if: matrix.compiler == 'flang'
+        run: flang src/adventure.f src/adventure_shims.f -o adventure
+
+      - name: Smoke test
+        run: |
+          printf "Y\nLOOK\n" | timeout 10 ./adventure | tee output.txt
+          grep -q "WELCOME TO ADVENTURE" output.txt
+          grep -q "YOU ARE STANDING AT THE END OF A ROAD" output.txt
+
+      - name: Smoke test (movement into the building)
+        run: |
+          printf "Y\nIN\n" | timeout 10 ./adventure | tee move_output.txt
+          grep -q "YOU ARE INSIDE A BUILDING" move_output.txt
+
+      - name: Regression suite (native)
+        env:
+          ADVENTURE_NATIVE: ./adventure
+        run: node scripts/run-tests.mjs --native-only
+
+  build-wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup LFortran
+        uses: minhqdao/setup-fortran@v1
+        with:
+          compiler: lfortran
+
+      - name: Setup Emscripten
+        uses: emscripten-core/setup-emsdk@v16
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Build WebAssembly
+        env:
+          EMCC: ${{ env.EMSDK }}/upstream/emscripten/emcc
+        run: scripts/build-web.sh
+
+      - name: WASM smoke test
+        run: |
+          node scripts/headless-test.mjs web/adventure.js Y LOOK | tee output.txt
+          grep -q "WELCOME TO ADVENTURE" output.txt
+          grep -q "YOU ARE STANDING AT THE END OF A ROAD" output.txt
+
+      - name: WASM smoke test (movement into the building)
+        run: |
+          node scripts/headless-test.mjs web/adventure.js Y IN | tee move_output.txt
+          grep -q "YOU ARE INSIDE A BUILDING" move_output.txt
+
+      - name: Install gfortran (native parity reference)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gfortran
+
+      - name: WASM regression suite (with native parity)
+        run: node scripts/run-tests.mjs
+
+      - name: Upload WASM artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: wasm-build
+          path: |
+            web/adventure.js
+            web/adventure.wasm
+          if-no-files-found: error
+
+  deploy-pages:
+    needs: build-wasm
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download WASM artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: wasm-build
+          path: web
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v6
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: web
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
