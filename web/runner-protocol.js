@@ -27,7 +27,12 @@ export function createKeysBuffer() {
   return new SharedArrayBuffer(keysTextOffset + maxInputLength + 1);
 }
 
-/** @param {Uint8Array} view @param {string} line */
+/**
+ * Writes one submitted line (including its trailing "\n") and its length.
+ * The caller must keep the line within printable ASCII plus the newline;
+ * the buffer stores single bytes, so other code points would wrap silently.
+ * @param {Uint8Array} view @param {string} line
+ */
 export function writeInputLine(view, line) {
   if (line.length > 255 || keysTextOffset + line.length > view.length) {
     throw new RangeError(

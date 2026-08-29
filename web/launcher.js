@@ -374,6 +374,12 @@ terminalInput.addEventListener("input", (event) => {
     return;
   }
 
+  // The input buffer stores one byte per character; drop anything outside
+  // printable ASCII (IME/CJK/pasted Unicode would otherwise wrap into wrong
+  // codes). Keeps the native value, display and submitted text consistent.
+  const printable = terminalInput.value.replace(/[^\x20-\x7E]/g, "");
+  if (printable !== terminalInput.value) terminalInput.value = printable;
+
   // Enforce max length on the input field
   if (terminalInput.value.length > maxInputLength) {
     terminalInput.value = terminalInput.value.slice(0, maxInputLength);
