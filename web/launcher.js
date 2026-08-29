@@ -32,7 +32,9 @@ const screen = document.getElementById("screen");
 const terminalContainer = document.getElementById("terminal-container");
 const status = document.getElementById("status");
 const restartButton = document.getElementById("restart-game");
-const terminalInput = document.getElementById("terminal-input");
+const terminalInput = /** @type {HTMLInputElement} */ (
+  document.getElementById("terminal-input")
+);
 
 const wasmUrl = new URL("./adventure.js", import.meta.url).href;
 
@@ -230,6 +232,16 @@ function handleTerminalMouseDown(event) {
 // Mobile Safari can resize and pan its visual viewport at different points in
 // the keyboard animation. Constrain the terminal itself instead of scrolling
 // the page, which avoids exposing Safari's blank root scroll area.
+/**
+ * The visual viewport when available, otherwise window. Only the members
+ * below are read, with ?? fallbacks to innerWidth/innerHeight on window.
+ * @type {{
+ *   width?: number,
+ *   height?: number,
+ *   offsetTop?: number,
+ *   addEventListener: typeof window.addEventListener,
+ * }}
+ */
 const keyboardViewport = window.visualViewport ?? window;
 const usesMobilePointer = window.matchMedia("(pointer: coarse)");
 let previousViewportWidth = keyboardViewport.width ?? window.innerWidth;
@@ -366,7 +378,7 @@ terminalInput.addEventListener("input", (event) => {
 
   // Mobile keyboards often insert a newline (\n) or trigger insertLineBreak instead of an 'Enter' keydown event
   if (
-    event.inputType === "insertLineBreak" ||
+    /** @type {InputEvent} */ (event).inputType === "insertLineBreak" ||
     terminalInput.value.includes("\n")
   ) {
     terminalInput.value = terminalInput.value.replace(/\n/g, "");

@@ -56,6 +56,19 @@ jobs:
           ADVENTURE_NATIVE: ./adventure
         run: node scripts/run-tests.mjs --native-only
 
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Typecheck @ts-check sources
+        run: npx -y -p typescript@5.9.2 tsc --noEmit --allowJs --target esnext --module esnext --moduleResolution bundler --lib dom,dom.iterable,esnext web/launcher.js web/runner-protocol.js web/runner.worker.js
+
   build-wasm:
     runs-on: ubuntu-latest
     steps:
