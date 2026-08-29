@@ -99,6 +99,14 @@ node scripts/run-tests.mjs grate         # only tests whose name matches
 
 CI additionally runs the suite natively against each compiler of the build matrix (`ADVENTURE_NATIVE=./adventure node scripts/run-tests.mjs --native-only`).
 
+## Typecheck
+
+`scripts/typecheck.sh` type-checks the hand-written `// @ts-check` sources in `web/`, the same command CI runs.
+
+```bash
+scripts/typecheck.sh
+```
+
 ## License
 
 The 1977 Adventure sources ship with no license (see the [wh0am1-dev/adventure](https://github.com/wh0am1-dev/adventure) repository for details); this project makes no claim over them. All additions in this repository — the port, shims, build scripts, web launcher and CI — are covered by the ISC license; see [LICENSE](LICENSE).

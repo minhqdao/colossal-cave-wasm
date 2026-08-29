@@ -67,7 +67,7 @@ jobs:
           node-version: 24
 
       - name: Typecheck @ts-check sources
-        run: npx -y -p typescript@5.9.2 tsc --noEmit --allowJs --target esnext --module esnext --moduleResolution bundler --lib dom,dom.iterable,esnext web/launcher.js web/runner-protocol.js web/runner.worker.js
+        run: scripts/typecheck.sh
 
   build-wasm:
     runs-on: ubuntu-latest
