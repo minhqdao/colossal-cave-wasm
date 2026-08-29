@@ -106,4 +106,4 @@ The test suite runs scripted game sessions against the WebAssembly build and che
 
 The original FORTRAN source of Colossal Cave Adventure was written by Will Crowther (1976) and extended by Don Woods (1977). It was distributed without a license notice and is widely treated as public domain. The source in this repository was obtained from [wh0am1-dev/adventure](https://github.com/wh0am1-dev/adventure); this repository makes no copyright claim on the original game source or its database file.
 
-All additions in this repository — the source patches, runtime shims (`IFILE`, `ADVRAN`, `GETLIN`/`NXTINT`), build scripts, web launcher and CI — are licensed under the [ISC License](LICENSE).
+All additions in this repository — the source patches, runtime shims (`IFILE`, `ADVRAN`, `GETLIN`/`NXTINT`), build scripts, web launcher and CI — are licensed under the [MIT License](LICENSE).
