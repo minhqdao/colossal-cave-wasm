@@ -10,6 +10,47 @@ function messageRecord(value) {
   return /** @type {Record<string, unknown>} */ (value);
 }
 
+// --- input line layout -------------------------------------------------------
+//
+// The keys SharedArrayBuffer carries one submitted line at a time:
+// [0] character length, [1] padding, [2..] the characters including the
+// trailing newline. The launcher, the runner worker and the Node test
+// driver all share this layout, so the buffer size and the accessors live
+// here; a maximum-length line must fit without Atomics silently dropping
+// out-of-range writes.
+
+export const maxInputLength = 254;
+const keysLengthSlot = 0;
+const keysTextOffset = 2;
+
+export function createKeysBuffer() {
+  return new SharedArrayBuffer(keysTextOffset + maxInputLength + 1);
+}
+
+/** @param {Uint8Array} view @param {string} line */
+export function writeInputLine(view, line) {
+  if (line.length > 255 || keysTextOffset + line.length > view.length) {
+    throw new RangeError(
+      `input line of ${line.length} characters exceeds the keys buffer`,
+    );
+  }
+  for (let index = 0; index < line.length; index++) {
+    Atomics.store(view, keysTextOffset + index, line.charCodeAt(index));
+  }
+  Atomics.store(view, keysLengthSlot, line.length);
+}
+
+/** @param {Uint8Array} view @returns {string | null} null on EOF */
+export function readInputLine(view) {
+  const length = Atomics.load(view, keysLengthSlot);
+  if (length === 0) return null;
+  let text = "";
+  for (let index = 0; index < length; index++) {
+    text += String.fromCharCode(Atomics.load(view, keysTextOffset + index));
+  }
+  return text;
+}
+
 function requiredString(message, field) {
   const value = message[field];
   if (typeof value !== "string" || !value) {

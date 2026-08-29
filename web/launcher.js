@@ -16,7 +16,13 @@ import {
   terminalHeightAboveViewport,
 } from "./terminal-scroll.js";
 import { hasTextSelection, updateTextContent } from "./terminal-selection.js";
-import { runnerCommand, runnerEvent } from "./runner-protocol.js";
+import {
+  createKeysBuffer,
+  maxInputLength,
+  runnerCommand,
+  runnerEvent,
+  writeInputLine,
+} from "./runner-protocol.js";
 import { createFrameBatcher } from "./terminal-render.js";
 
 const output = document.getElementById("output");
@@ -39,7 +45,6 @@ let isCursorActive = false;
 let worker;
 let workerStartupTimer;
 let runId = 0;
-const maxInputLength = 254;
 const maxStartupRetries = 1;
 const workerStartupTimeoutMs = 15_000;
 
@@ -140,10 +145,7 @@ function submitInput() {
   render();
   scrollTerminalToBottom(screen);
 
-  for (let index = 0; index < value.length; index++) {
-    Atomics.store(sharedKeys, 2 + index, value.charCodeAt(index));
-  }
-  Atomics.store(sharedKeys, 0, value.length);
+  writeInputLine(sharedKeys, value);
   Atomics.store(sharedBuffer, 0, 1);
   Atomics.notify(sharedBuffer, 0, 1);
 }
@@ -439,7 +441,7 @@ async function start() {
   }
 
   const buffer = new SharedArrayBuffer(4);
-  const keys = new SharedArrayBuffer(256);
+  const keys = createKeysBuffer();
   sharedBuffer = new Int32Array(buffer);
   sharedKeys = new Uint8Array(keys);
   Atomics.store(sharedBuffer, 0, 0);

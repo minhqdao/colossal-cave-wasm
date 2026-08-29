@@ -37,6 +37,12 @@ import { statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { runNative, runWasm, normalize } from "./game-driver.mjs";
+import {
+  createKeysBuffer,
+  maxInputLength,
+  readInputLine,
+  writeInputLine,
+} from "../web/runner-protocol.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const wasmPath = `${root}web/adventure.js`;
@@ -296,6 +302,16 @@ const tests = [
     name: "input-long-line-uses-first-two-words",
     input: ["N", "GET LAMP AND THEN LEAVE"],
     expect: ["I SEE NO LAMP HERE."],
+  },
+  {
+    // A maximum-length line (254 chars: the launcher's cap, plus the newline
+    // the driver appends = exactly the keys buffer capacity) followed by a
+    // normal command. If the trailing newline were dropped, the two lines
+    // would merge and produce a single response instead of two.
+    name: "input-max-length-line-newline-intact",
+    input: ["N", "LOOK " + "X".repeat(maxInputLength - 5), "LOOK"],
+    counts: [[/REPEAT THE LONG DESCRIPTION OF YOUR LOCATION\./g, 2]],
+    expect: ["YOU ARE STANDING AT THE END OF A ROAD"],
   },
   {
     // The second word THE is not in the vocabulary, so the line is rejected.
@@ -762,15 +778,68 @@ if (!nativeOnly && !runNativeSide) {
   console.log("-- native parity disabled (gfortran not found or --no-parity) --");
 }
 
+const protocolName = "protocol-input-buffer-invariants";
+const runProtocol = !filter || protocolName.includes(filter);
+
 let selected = tests.filter((test) => !test.skip);
 if (filter) selected = selected.filter((test) => test.name.includes(filter));
-if (selected.length === 0) {
+if (selected.length === 0 && !runProtocol) {
   console.error(`no tests match "${filter ?? ""}"`);
   process.exit(2);
 }
 
 let passed = 0;
 const failures = [];
+
+// Fast synchronous invariant checks on the shared input-buffer protocol, run
+// before any game session. The buffer that carries a submitted line must be
+// large enough for a maximum-length line plus its newline: a max line is
+// `maxInputLength` chars + '\n' written at offset 2, so the earlier bug (the
+// trailing byte landing one index past a fixed 256-byte buffer) can never
+// silently drop a newline again.
+function protocolInvariants() {
+  const problems = [];
+  const view = new Uint8Array(createKeysBuffer());
+
+  const roundTrip = (text) => {
+    writeInputLine(view, text);
+    const readBack = readInputLine(view);
+    if (readBack !== text) {
+      problems.push(
+        `round trip lost data: wrote ${JSON.stringify(text)}, read ${JSON.stringify(readBack)}`,
+      );
+    }
+  };
+
+  // A zero-length write is the wire signal for EOF, read back as null.
+  writeInputLine(view, "");
+  if (readInputLine(view) !== null) {
+    problems.push("a zero-length write should read back as EOF (null)");
+  }
+  roundTrip("\n");
+  roundTrip("X".repeat(maxInputLength) + "\n");
+
+  const maxLength = "X".repeat(maxInputLength + 1) + "\n";
+  try {
+    writeInputLine(view, maxLength);
+    problems.push(`a ${maxLength.length}-char line should not fit the keys buffer`);
+  } catch (error) {
+    if (!(error instanceof RangeError)) problems.push(`overflow threw ${error}`);
+  }
+  return problems;
+}
+
+if (runProtocol) {
+  const problems = protocolInvariants();
+  if (problems.length === 0) {
+    passed++;
+    console.log(`PASS ${protocolName}`);
+  } else {
+    failures.push(protocolName);
+    console.log(`FAIL ${protocolName}`);
+    for (const problem of problems) console.log(`     ${problem}`);
+  }
+}
 
 for (const test of selected) {
   const problems = [];
@@ -814,6 +883,6 @@ for (const test of selected) {
   }
 }
 
-console.log(`\n${passed}/${selected.length} tests passed` +
+console.log(`\n${passed}/${selected.length + (runProtocol ? 1 : 0)} tests passed` +
   (failures.length ? `; failures: ${failures.join(", ")}` : ""));
 process.exit(failures.length ? 1 : 0);

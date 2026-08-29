@@ -13,6 +13,10 @@
 
 import { Worker } from "node:worker_threads";
 import { spawn } from "node:child_process";
+import {
+  createKeysBuffer,
+  writeInputLine,
+} from "../web/runner-protocol.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -57,7 +61,7 @@ export function runWasm(wasmUrl, lines, opts = {}) {
     );
 
     const buffer = new SharedArrayBuffer(4);
-    const keys = new SharedArrayBuffer(256);
+    const keys = createKeysBuffer();
     const sharedBuffer = new Int32Array(buffer);
     const sharedKeys = new Uint8Array(keys);
 
@@ -76,11 +80,7 @@ export function runWasm(wasmUrl, lines, opts = {}) {
     };
 
     const sendLine = (line) => {
-      const value = `${line}\n`;
-      for (let index = 0; index < value.length; index++) {
-        Atomics.store(sharedKeys, 2 + index, value.charCodeAt(index));
-      }
-      Atomics.store(sharedKeys, 0, value.length);
+      writeInputLine(sharedKeys, `${line}\n`);
       Atomics.store(sharedBuffer, 0, 1);
       Atomics.notify(sharedBuffer, 0, 1);
     };
@@ -103,10 +103,21 @@ export function runWasm(wasmUrl, lines, opts = {}) {
           stderrBuf += message.text;
           break;
         case "REQUEST_INPUT":
-          if (lineIndex < lines.length) {
-            sendLine(lines[lineIndex++]);
-          } else {
-            sendEof();
+          try {
+            if (lineIndex < lines.length) {
+              sendLine(lines[lineIndex++]);
+            } else {
+              sendEof();
+            }
+          } catch (error) {
+            // An input line the shared protocol cannot carry (e.g. over the
+            // buffer cap) fails this session instead of crashing the runner.
+            finish({
+              output,
+              stderr: `${stderrBuf}${error}\n`,
+              exitCode: 1,
+              timedOut,
+            });
           }
           break;
         case "EXIT":
