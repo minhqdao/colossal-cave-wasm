@@ -28,6 +28,7 @@ import { createFrameBatcher } from "./terminal-render.js";
 const output = document.getElementById("output");
 const input = document.getElementById("input");
 const cursor = document.getElementById("cursor");
+const inputHint = document.getElementById("input-hint");
 const screen = document.getElementById("screen");
 const terminalContainer = document.getElementById("terminal-container");
 const status = document.getElementById("status");
@@ -47,8 +48,14 @@ let isCursorActive = false;
 let worker;
 let workerStartupTimer;
 let runId = 0;
+let lastWorkerMessageAt = 0;
+let inputResponseTimer;
 const maxStartupRetries = 1;
 const workerStartupTimeoutMs = 15_000;
+// The game answers a submitted line within a few milliseconds; the worker is
+// also the only thing that can ever clear the "waiting for input" state, so
+// a silent gap after submitting means iOS suspended the process mid-flight.
+const inputResponseTimeoutMs = 2_500;
 
 function appendOutput(text) {
   if (!hasReceivedFirstOutput) {
@@ -92,143 +99,6 @@ function cancelOutputRender() {
   outputRenderer.cancel();
 }
 
-function render() {
-  updateTextContent(output, terminalText);
-  updateTextContent(input, waitingForInput ? currentInput : "");
-
-  updateTextContent(cursor, waitingForInput ? "_" : "");
-
-  const shouldShowCursor =
-    waitingForInput && document.activeElement === terminalInput;
-
-  if (shouldShowCursor) {
-    if (!isCursorActive) {
-      // Transitioning from inactive to active: restart animation
-      isCursorActive = true;
-      cursor.style.visibility = "visible";
-      cursor.classList.remove("blinking");
-      void cursor.offsetWidth; // Force reflow to restart CSS animation
-      cursor.classList.add("blinking");
-    } else {
-      // Already active, just ensure it's visible
-      cursor.style.visibility = "visible";
-    }
-  } else {
-    // Inactive or not waiting for input
-    isCursorActive = false;
-    cursor.style.visibility = "hidden";
-  }
-}
-
-function setStatus(message) {
-  status.textContent = message;
-  status.hidden = !message;
-}
-
-function releaseWorker() {
-  terminalInput.blur();
-  clearTimeout(workerStartupTimer);
-  workerStartupTimer = undefined;
-  if (worker) {
-    worker.terminate();
-    worker = undefined;
-  }
-  sharedBuffer = undefined;
-  sharedKeys = undefined;
-}
-
-function submitInput() {
-  const value = `${currentInput}\n`;
-  terminalText += value;
-  pendingInputSeparator = true;
-  currentInput = "";
-  terminalInput.value = "";
-  waitingForInput = false;
-  render();
-  scrollTerminalToBottom(screen);
-
-  writeInputLine(sharedKeys, value);
-  Atomics.store(sharedBuffer, 0, 1);
-  Atomics.notify(sharedBuffer, 0, 1);
-}
-
-let preserveTerminalScrollOnFocus = false;
-
-function focusTerminalInput({ preserveScroll = false } = {}) {
-  if (!waitingForInput || document.activeElement === terminalInput) return;
-  const scrollTop = screen.scrollTop;
-  preserveTerminalScrollOnFocus = preserveScroll;
-  try {
-    terminalInput.focus({ preventScroll: true });
-  } finally {
-    preserveTerminalScrollOnFocus = false;
-  }
-  moveInputCaretToEnd(terminalInput);
-  if (preserveScroll) screen.scrollTop = scrollTop;
-}
-
-function keepActiveInputVisible() {
-  if (waitingForInput && document.activeElement === terminalInput) {
-    scrollTerminalToBottom(screen);
-  }
-}
-
-function restoreTerminalAfterVisibilityChange() {
-  if (document.visibilityState !== "visible") return;
-
-  const scrollTop = screen.scrollTop;
-  const maxScrollTop = screen.scrollHeight - screen.clientHeight;
-  if (maxScrollTop > 0) {
-    screen.scrollTop = scrollTop > 0 ? scrollTop - 1 : 1;
-    screen.scrollTop = scrollTop;
-  }
-  if (!usesTouchInput()) focusTerminalInput({ preserveScroll: true });
-}
-
-let terminalPointerInteraction = false;
-
-function handleTerminalClick() {
-  // A click is also fired after dragging to select text. Refocusing the hidden
-  // input here would collapse the range the user just created.
-  if (!hasTextSelection(window.getSelection())) {
-    focusTerminalInput();
-  } else {
-    render();
-  }
-  terminalPointerInteraction = false;
-}
-
-let touchMouseEventPending = false;
-
-function handleTerminalPointerDown(event) {
-  terminalPointerInteraction = true;
-  touchMouseEventPending = isTouchPointer(event);
-  if (touchMouseEventPending) focusTerminalInput();
-}
-
-function handleTerminalPointerCancel() {
-  terminalPointerInteraction = false;
-  render();
-}
-
-function handleTerminalMouseDown(event) {
-  const followsTouch = touchMouseEventPending;
-  touchMouseEventPending = false;
-  const targetsTerminalBackground =
-    event.target === screen || event.target === terminalContainer;
-
-  // Mobile browsers synthesize mouse events after a touch, while desktop
-  // browsers move focus when the blank terminal background is clicked. Avoid
-  // both redundant blur/refocus cycles. Mouse selection still works because
-  // mousedown events that target terminal text keep their default behavior.
-  if (
-    document.activeElement === terminalInput &&
-    (followsTouch || targetsTerminalBackground)
-  ) {
-    event.preventDefault();
-  }
-}
-
 // Mobile Safari can resize and pan its visual viewport at different points in
 // the keyboard animation. Constrain the terminal itself instead of scrolling
 // the page, which avoids exposing Safari's blank root scroll area.
@@ -253,6 +123,25 @@ let keyboardCheckTimers = [];
 
 function usesTouchInput() {
   return usesMobilePointer.matches || navigator.maxTouchPoints > 0;
+}
+
+// iOS only raises the on-screen keyboard for focus() calls made inside a
+// gesture handler, so the auto-focus issued when the game asks for input
+// leaves the field focused with the keyboard still closed. Every later focus
+// request must detect that state, otherwise the tap is swallowed by an
+// "already focused" guard and the keyboard never appears.
+function softKeyboardIsOpen() {
+  const height = keyboardViewport.height ?? window.innerHeight;
+  const closedHeight = Math.max(
+    keyboardClosedViewportHeight ?? 0,
+    window.innerHeight,
+    height,
+  );
+  return closedHeight - height > 80;
+}
+
+function needsSoftKeyboardFocus() {
+  return usesTouchInput() && !softKeyboardIsOpen();
 }
 
 function clearKeyboardConstraint() {
@@ -327,6 +216,7 @@ function handleKeyboardViewportResize() {
   if (widthChanged) {
     clearKeyboardConstraint();
     keyboardClosedViewportHeight = height;
+    render();
     return;
   }
   if (
@@ -335,9 +225,11 @@ function handleKeyboardViewportResize() {
       height >= window.innerHeight - 80)
   ) {
     clearKeyboardConstraint();
+    render();
     return;
   }
   queueKeyboardConstraintCheck();
+  render();
 }
 
 keyboardViewport.addEventListener("resize", handleKeyboardViewportResize);
@@ -355,7 +247,7 @@ terminalInput.addEventListener("focus", () => {
     keyboardViewport.height ?? window.innerHeight,
   );
   previousViewportWidth = keyboardViewport.width ?? window.innerWidth;
-  keyboardCheckTimers = [50, 300, 700].map((delay) =>
+  keyboardCheckTimers = [50, 300, 700, 1200].map((delay) =>
     setTimeout(queueKeyboardConstraintCheck, delay),
   );
 });
@@ -369,8 +261,188 @@ terminalInput.addEventListener("blur", () => {
   // Clicking terminal text briefly transfers focus so the browser can retain
   // native text selection. Keep the existing cursor animation running until
   // the click determines whether this was a tap/click or a selection drag.
-  if (!terminalPointerInteraction) render();
+  if (!terminalPointerInteraction || needsSoftKeyboardFocus()) render();
 });
+
+function render() {
+  updateTextContent(output, terminalText);
+  updateTextContent(input, waitingForInput ? currentInput : "");
+
+  updateTextContent(cursor, waitingForInput ? "_" : "");
+
+  const shouldShowCursor =
+    waitingForInput && document.activeElement === terminalInput;
+
+  if (shouldShowCursor) {
+    if (!isCursorActive) {
+      // Transitioning from inactive to active: restart animation
+      isCursorActive = true;
+      cursor.style.visibility = "visible";
+      cursor.classList.remove("blinking");
+      void cursor.offsetWidth; // Force reflow to restart CSS animation
+      cursor.classList.add("blinking");
+    } else {
+      // Already active, just ensure it's visible
+      cursor.style.visibility = "visible";
+    }
+  } else {
+    // Inactive or not waiting for input
+    isCursorActive = false;
+    cursor.style.visibility = "hidden";
+  }
+
+  // On touch devices the field is usually focused without the keyboard being
+  // open, so the blinking cursor is the only -- and invisible -- cue. Print
+  // the prompt so the required tap is discoverable; it disappears as soon as
+  // the viewport shrinks for the keyboard.
+  const showInputHint = waitingForInput && needsSoftKeyboardFocus();
+  updateTextContent(inputHint, showInputHint ? "TAP TO TYPE" : "");
+  inputHint.hidden = !showInputHint;
+}
+
+function setStatus(message) {
+  status.textContent = message;
+  status.hidden = !message;
+}
+
+function releaseWorker() {
+  terminalInput.blur();
+  clearTimeout(workerStartupTimer);
+  workerStartupTimer = undefined;
+  clearTimeout(inputResponseTimer);
+  inputResponseTimer = undefined;
+  if (worker) {
+    worker.terminate();
+    worker = undefined;
+  }
+  sharedBuffer = undefined;
+  sharedKeys = undefined;
+}
+
+function submitInput() {
+  // Safety net for a worker that vanished without a pagehide/pageshow cycle
+  // (iOS reclaiming a suspended tab): the submit would otherwise vanish into
+  // dead shared memory. The watchdog below covers the slower variant where
+  // the worker dies after the line was queued.
+  if (!worker || !sharedBuffer || !sharedKeys) {
+    restartGame();
+    return;
+  }
+
+  const value = `${currentInput}\n`;
+  terminalText += value;
+  pendingInputSeparator = true;
+  currentInput = "";
+  terminalInput.value = "";
+  waitingForInput = false;
+  render();
+  scrollTerminalToBottom(screen);
+
+  writeInputLine(sharedKeys, value);
+  Atomics.store(sharedBuffer, 0, 1);
+  Atomics.notify(sharedBuffer, 0, 1);
+
+  // A worker killed while the page was hidden (pagehide terminated it, or iOS
+  // reclaimed it) never consumes the line and never reports anything: without
+  // this watch the terminal would look frozen with a keyboard open.
+  const submittedAt = Date.now();
+  clearTimeout(inputResponseTimer);
+  inputResponseTimer = setTimeout(() => {
+    inputResponseTimer = undefined;
+    if (lastWorkerMessageAt < submittedAt) restartGame();
+  }, inputResponseTimeoutMs);
+}
+
+let preserveTerminalScrollOnFocus = false;
+
+function focusTerminalInput({ preserveScroll = false, force = false } = {}) {
+  if (!waitingForInput) return;
+  if (document.activeElement === terminalInput) {
+    // Tapping never changes the active element when an earlier focus() -- iOS
+    // accepts it outside a gesture but shows no keyboard -- is already there,
+    // so a plain re-focus would be a no-op. Blur first: within the tap
+    // gesture the following focus() then really is an activation and iOS
+    // opens the keyboard.
+    if (!force || !needsSoftKeyboardFocus()) return;
+    terminalInput.blur();
+  }
+  const scrollTop = screen.scrollTop;
+  preserveTerminalScrollOnFocus = preserveScroll;
+  try {
+    terminalInput.focus({ preventScroll: true });
+  } finally {
+    preserveTerminalScrollOnFocus = false;
+  }
+  moveInputCaretToEnd(terminalInput);
+  if (preserveScroll) screen.scrollTop = scrollTop;
+}
+
+function keepActiveInputVisible() {
+  if (waitingForInput && document.activeElement === terminalInput) {
+    scrollTerminalToBottom(screen);
+  }
+}
+
+function restoreTerminalAfterVisibilityChange() {
+  if (document.visibilityState !== "visible") return;
+
+  const scrollTop = screen.scrollTop;
+  const maxScrollTop = screen.scrollHeight - screen.clientHeight;
+  if (maxScrollTop > 0) {
+    screen.scrollTop = scrollTop > 0 ? scrollTop - 1 : 1;
+    screen.scrollTop = scrollTop;
+  }
+  // Re-request focus on touch devices too: the field is likely still focused
+  // from before the tab was hidden, but iOS drops the keyboard while hidden
+  // and a focus event that does not change anything will not bring it back.
+  // The tap itself re-focuses with force on pointerdown; this call only
+  // refreshes the caret and re-arms the keyboard-constraint checks.
+  focusTerminalInput({ preserveScroll: true });
+}
+
+let terminalPointerInteraction = false;
+
+function handleTerminalClick() {
+  // A click is also fired after dragging to select text. Refocusing the hidden
+  // input here would collapse the range the user just created.
+  if (!hasTextSelection(window.getSelection())) {
+    focusTerminalInput();
+  } else {
+    render();
+  }
+  terminalPointerInteraction = false;
+}
+
+let touchMouseEventPending = false;
+
+function handleTerminalPointerDown(event) {
+  terminalPointerInteraction = true;
+  touchMouseEventPending = isTouchPointer(event);
+  if (touchMouseEventPending) focusTerminalInput({ force: true });
+}
+
+function handleTerminalPointerCancel() {
+  terminalPointerInteraction = false;
+  render();
+}
+
+function handleTerminalMouseDown(event) {
+  const followsTouch = touchMouseEventPending;
+  touchMouseEventPending = false;
+  const targetsTerminalBackground =
+    event.target === screen || event.target === terminalContainer;
+
+  // Mobile browsers synthesize mouse events after a touch, while desktop
+  // browsers move focus when the blank terminal background is clicked. Avoid
+  // both redundant blur/refocus cycles. Mouse selection still works because
+  // mousedown events that target terminal text keep their default behavior.
+  if (
+    document.activeElement === terminalInput &&
+    (followsTouch || targetsTerminalBackground)
+  ) {
+    event.preventDefault();
+  }
+}
 
 // 1. Handle live typing, backspacing, and mobile "Return/Go" keys
 terminalInput.addEventListener("input", (event) => {
@@ -547,6 +619,7 @@ function launchWorker(buffer, keys, currentRunId, attempt = 0) {
 
   activeWorker.onmessage = (event) => {
     if (worker !== activeWorker) return;
+    lastWorkerMessageAt = Date.now();
     const data = runnerEvent(event.data);
     if (data.type === "READY") {
       activeWorker.postMessage(
@@ -561,7 +634,7 @@ function launchWorker(buffer, keys, currentRunId, attempt = 0) {
       terminalInput.value = "";
       waitingForInput = true;
       flushOutputRender();
-      focusTerminalInput(); // Auto-focus input field and pull up mobile keyboard
+      focusTerminalInput(); // Focus the command field; a tap opens the keyboard on mobile
     } else if (data.type === "ERROR") {
       if (!hasStarted) {
         handleStartupFailure(data.message);
@@ -588,13 +661,20 @@ function launchWorker(buffer, keys, currentRunId, attempt = 0) {
   );
 }
 
-window.addEventListener("pagehide", releaseWorker, { once: true });
+// iOS fires pagehide when a tab is backgrounded, and the worker either dies
+// with the suspended process or is terminated here. Any restore path (plain
+// foregrounding, bfcache) then resumes into a dead game, so remember that a
+// live game was lost and restart on the next pageshow.
+let interruptedByPageHide = false;
 
-// iOS Safari frequently restores tabs from the back/forward cache with the
-// game worker already terminated, leaving a frozen terminal. Restart cleanly
-// when such a restore is detected.
-window.addEventListener("pageshow", (event) => {
-  if (!event.persisted) return;
+window.addEventListener("pagehide", () => {
+  interruptedByPageHide = Boolean(worker);
+  releaseWorker();
+});
+
+window.addEventListener("pageshow", () => {
+  if (!interruptedByPageHide) return;
+  interruptedByPageHide = false;
   restartGame();
 });
 
@@ -610,6 +690,7 @@ function reportStartError(error) {
 
 function restartGame() {
   runId += 1;
+  interruptedByPageHide = false;
   releaseWorker();
   cancelOutputRender();
   terminalText = "LOADING...\n";
