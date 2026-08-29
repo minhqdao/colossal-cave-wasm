@@ -1,13 +1,3 @@
-The original FORTRAN source of Colossal Cave Adventure was written by
-Will Crowther (1976) and extended by Don Woods (1977). It was
-distributed without a license notice and is widely treated as public
-domain; this repository does not claim copyright on the original game
-source or its database file.
-
-All additions in this repository -- build scripts, runtime shims
-(IFILE, RAN, GETIN rewrite), source patches, and the
-WebAssembly/browser runner -- are licensed under the ISC License:
-
 ISC License
 
 Copyright (c) 2026 Minh Dao
