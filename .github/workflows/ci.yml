@@ -109,6 +109,15 @@ jobs:
       - name: WASM regression suite (with native parity)
         run: node scripts/run-tests.mjs
 
+      - name: Check committed artifacts match build
+        run: |
+          if git diff --quiet --no-color -- web/adventure.js web/adventure.wasm; then
+            echo "Committed web/adventure.js and web/adventure.wasm match this build."
+          else
+            echo "::error::The committed web/adventure.js and web/adventure.wasm are stale: rebuilding from src/ with this toolchain changes them. Rebuild with scripts/build-web.sh and commit the result (or re-run the build job once its toolchain versions match the ones that produced the committed files)."
+            exit 1
+          fi
+
       - name: Upload WASM artifacts
         uses: actions/upload-artifact@v7
         with:
