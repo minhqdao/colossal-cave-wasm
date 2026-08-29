@@ -109,4 +109,6 @@ scripts/typecheck.sh
 
 ## License
 
-The 1977 Adventure sources ship with no license (see the [wh0am1-dev/adventure](https://github.com/wh0am1-dev/adventure) repository for details); this project makes no claim over them. All additions in this repository — the port, shims, build scripts, web launcher and CI — are covered by the ISC license; see [LICENSE](LICENSE).
+The original FORTRAN source of Colossal Cave Adventure was written by Will Crowther (1976) and extended by Don Woods (1977). It was distributed without a license notice and is widely treated as public domain (see the [wh0am1-dev/adventure](https://github.com/wh0am1-dev/adventure) repository for details); this repository makes no copyright claim on the original game source or its database file.
+
+All additions in this repository — the source patches, runtime shims (`IFILE`, `ADVRAN`, `GETLIN`/`NXTINT`), build scripts, web launcher and CI — are licensed under the [ISC License](LICENSE).
