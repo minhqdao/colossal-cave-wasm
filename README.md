@@ -89,7 +89,7 @@ Then open http://localhost:8080 in your browser.
 
 ## Tests
 
-`scripts/run-tests.mjs` runs a regression suite of scripted game sessions (63 scenarios) against the WebAssembly build and asserts on the transcripts: the instructions prompt, `HELP`, unknown/truncated/lowercase input, bare verbs, object and lamp handling, the grate lock state machine, the `XYZZY`/`PLUGH` magic words, darkness and non-fatal pit falls, the bird puzzle, dwarf encounters and the 1976 quirks that come with them. Because the game is fully deterministic (the rng seed is a fixed `DATA` constant), even rng-driven events are reproducible and asserted directly. The suite also requires the wasm transcript to be identical to a native gfortran build's.
+`scripts/run-tests.mjs` runs a regression suite of scripted game sessions (65 scenarios) against the WebAssembly build and asserts on the transcripts, plus synchronous invariant checks on the launcher/worker input-buffer protocol: the instructions prompt, `HELP`, unknown/truncated/lowercase input, bare verbs, object and lamp handling, the grate lock state machine, the `XYZZY`/`PLUGH` magic words, darkness and non-fatal pit falls, the bird puzzle, dwarf encounters and the 1976 quirks that come with them. Because the game is fully deterministic (the rng seed is a fixed `DATA` constant), even rng-driven events are reproducible and asserted directly. The suite also requires the wasm transcript to be identical to a native gfortran build's.
 
 ```bash
 node scripts/run-tests.mjs               # wasm + native parity (needs gfortran)
