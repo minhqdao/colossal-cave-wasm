@@ -188,6 +188,15 @@
           color 0.18s ease-out,
           text-shadow 0.18s ease-out;
       }
+      .terminal-actions a svg {
+        fill: none;
+        margin-left: 5px;
+        shape-rendering: crispEdges;
+        stroke: currentColor;
+        stroke-linecap: butt;
+        stroke-linejoin: miter;
+        stroke-width: 1;
+      }
       button {
         --button-transition: 0.18s ease-out;
         -webkit-appearance: none;
@@ -339,6 +348,7 @@
         </div>
       </div>
       <div class="terminal-actions">
+        <button id="restart-game" type="button">Restart game</button>
         <a
           id="github-link"
           href="https://github.com/minhqdao/colossal-cave-wasm"
@@ -346,8 +356,16 @@
           rel="noopener noreferrer"
         >
           Source
+          <svg
+            aria-hidden="true"
+            width="9"
+            height="9"
+            viewBox="0 0 9 9"
+            focusable="false"
+          >
+            <path d="M1 8 L8 1 M8 1 H4 M8 1 V5" />
+          </svg>
         </a>
-        <button id="restart-game" type="button">Restart game</button>
       </div>
     </main>
     <script type="module" crossorigin src="./launcher.js"></script>
