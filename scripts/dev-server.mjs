@@ -5,7 +5,7 @@
 // Usage: node scripts/dev-server.mjs [port]
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
-import { extname, join, normalize } from "node:path";
+import { extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../web", import.meta.url));
@@ -29,7 +29,7 @@ createServer(async (request, response) => {
     let pathname = decodeURIComponent(url.pathname);
     if (pathname.endsWith("/")) pathname += "index.html";
     const filePath = normalize(join(root, pathname));
-    if (!filePath.startsWith(root)) {
+    if (!filePath.startsWith(root + sep)) {
       response.writeHead(403).end();
       return;
     }
