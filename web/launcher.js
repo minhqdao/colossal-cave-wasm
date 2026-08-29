@@ -28,7 +28,6 @@ import { createFrameBatcher } from "./terminal-render.js";
 const output = document.getElementById("output");
 const input = document.getElementById("input");
 const cursor = document.getElementById("cursor");
-const inputHint = document.getElementById("input-hint");
 const screen = document.getElementById("screen");
 const terminalContainer = document.getElementById("terminal-container");
 const status = document.getElementById("status");
@@ -216,7 +215,6 @@ function handleKeyboardViewportResize() {
   if (widthChanged) {
     clearKeyboardConstraint();
     keyboardClosedViewportHeight = height;
-    render();
     return;
   }
   if (
@@ -225,11 +223,9 @@ function handleKeyboardViewportResize() {
       height >= window.innerHeight - 80)
   ) {
     clearKeyboardConstraint();
-    render();
     return;
   }
   queueKeyboardConstraintCheck();
-  render();
 }
 
 keyboardViewport.addEventListener("resize", handleKeyboardViewportResize);
@@ -261,7 +257,7 @@ terminalInput.addEventListener("blur", () => {
   // Clicking terminal text briefly transfers focus so the browser can retain
   // native text selection. Keep the existing cursor animation running until
   // the click determines whether this was a tap/click or a selection drag.
-  if (!terminalPointerInteraction || needsSoftKeyboardFocus()) render();
+  if (!terminalPointerInteraction) render();
 });
 
 function render() {
@@ -290,14 +286,6 @@ function render() {
     isCursorActive = false;
     cursor.style.visibility = "hidden";
   }
-
-  // On touch devices the field is usually focused without the keyboard being
-  // open, so the blinking cursor is the only -- and invisible -- cue. Print
-  // the prompt so the required tap is discoverable; it disappears as soon as
-  // the viewport shrinks for the keyboard.
-  const showInputHint = waitingForInput && needsSoftKeyboardFocus();
-  updateTextContent(inputHint, showInputHint ? "TAP TO TYPE" : "");
-  inputHint.hidden = !showInputHint;
 }
 
 function setStatus(message) {

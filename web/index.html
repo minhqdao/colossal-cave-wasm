@@ -257,12 +257,6 @@
       #cursor.blinking {
         animation: cursor-blink 1s steps(1) infinite;
       }
-      #input-hint {
-        color: rgba(200, 248, 200, 0.72);
-      }
-      #input-hint[hidden] {
-        display: none;
-      }
       @keyframes cursor-blink {
         50% {
           opacity: 0;
@@ -343,7 +337,7 @@
         >
           <pre
             id="terminal"
-          ><span id="output">LOADING...</span><span id="input"></span><span id="cursor"></span><span id="input-hint"></span></pre>
+          ><span id="output">LOADING...</span><span id="input"></span><span id="cursor"></span></pre>
           <input
             id="terminal-input"
             type="text"
