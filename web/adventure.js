@@ -3928,7 +3928,7 @@ var UTF8Decoder = globalThis.TextDecoder && new TextDecoder();
       // full 4GB Wasm memories, the size will wrap back to 0 bytes in Wasm side
       // for any code that deals with heap sizes, which would require special
       // casing all heap size related code to treat 0 specially.
-      134217728;
+      33554432;
   
   var alignMemory = (size, alignment) => {
       assert(alignment, 'alignment argument is required');
@@ -4168,7 +4168,7 @@ var UTF8Decoder = globalThis.TextDecoder && new TextDecoder();
       checkStackCookie();
       if (e instanceof WebAssembly.RuntimeError) {
         if (_emscripten_stack_get_current() <= 0) {
-          err('Stack overflow detected.  You can try increasing -sSTACK_SIZE (currently set to 8388608)');
+          err('Stack overflow detected.  You can try increasing -sSTACK_SIZE (currently set to 1048576)');
         }
       }
       quit_(1, e);

@@ -82,17 +82,20 @@ cat src/adventure.f src/adventure_shims.f > "$BUILD_DIR/adventure_all.f"
 "$LFORTRAN" -c "${FFLAGS[@]}" -J "$BUILD_DIR" \
     "$BUILD_DIR/adventure_all.f" -o "$BUILD_DIR/adventure_all.o"
 
-# 16 MB initial / 128 MB max grown memory: iOS refuses large eager
-# allocations under WebContent memory pressure (a 256 MB fixed segment
-# aborts on reload with "RangeError: Out of memory"), while the game's
-# linear memory never approaches even the grown 16 MB start. The 8 MB
-# stack is bounded by measurement: full regression suite passes with
-# stack-overflow guards enabled at 64 KB, so it carries >100x headroom.
+# 4 MB initial / 32 MB max grown memory. This project's whole history of iOS
+# crashes is eager linear-memory reservation: a fixed 256 MB start aborted on
+# reload under WebContent memory pressure, and a 16 MB start still exhausted
+# a 2 GB iPhone 6s after a few refreshes (iOS reclaims the previous page's
+# memory lazily, so refreshes overlap). Measured high-water mark: a 200-turn
+# scripted playthrough never grows past the 4 MB start, so the reservation
+# fits within one small page while 32 MB remains a generous ceiling.
+# The 1 MB stack keeps >10x headroom over the 64 KB the suite's
+# stack-overflow guards have actually observed in use.
 "$EMCC" \
     --target=wasm32-unknown-emscripten \
-    -sSTACK_SIZE=8mb \
-    -sINITIAL_MEMORY=16mb \
-    -sMAXIMUM_MEMORY=128mb \
+    -sSTACK_SIZE=1mb \
+    -sINITIAL_MEMORY=4mb \
+    -sMAXIMUM_MEMORY=32mb \
     -sALLOW_MEMORY_GROWTH=1 \
     -sSTACK_OVERFLOW_CHECK=1 \
     -sEXIT_RUNTIME=1 \
