@@ -149,6 +149,20 @@ document.addEventListener(
   restoreTerminalAfterVisibilityChange,
 );
 
+// Desktop-only safety net. The keyboard-constraining code was removed in
+// favor of native page scrolling on touch, but on a desktop a window resize
+// (OS resize, fullscreen toggle, devtools dock) re-measures the scrollable
+// terminal without firing anything that keeps the just-shown prompt in view,
+// so it can end up scrolled off. Touch is deliberately excluded: the visual
+// viewport drives its own scrolling there and yanking the terminal to the
+// bottom during the soft-keyboard animation is exactly the behavior the
+// rework removed.
+window.addEventListener("resize", () => {
+  if (usesTouchInput()) return;
+  if (!waitingForInput || document.activeElement !== terminalInput) return;
+  scrollTerminalToBottom(screen);
+});
+
 terminalInput.addEventListener("focus", () => {
   render();
   // At focus time the keyboard is (nearly) always still closed, so this is
