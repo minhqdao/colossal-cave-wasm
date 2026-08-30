@@ -3,6 +3,7 @@
 /** @typedef {{type: "INIT", wasmUrl: string} | {type: "START", buffer: SharedArrayBuffer, keys: SharedArrayBuffer}} RunnerCommand */
 /** @typedef {{type: "READY"} | {type: "STARTED"} | {type: "STDOUT", text: string} | {type: "REQUEST_INPUT"} | {type: "ERROR", message: string} | {type: "EXIT"}} RunnerEvent */
 
+/** @param {unknown} value */
 function messageRecord(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError("Runner protocol message must be an object");
@@ -56,6 +57,10 @@ export function readInputLine(view) {
   return text;
 }
 
+/**
+ * @param {Record<string, unknown>} message
+ * @param {string} field
+ */
 function requiredString(message, field) {
   const value = message[field];
   if (typeof value !== "string" || !value) {
@@ -64,7 +69,10 @@ function requiredString(message, field) {
   return value;
 }
 
-/** Validates a command before it crosses the launcher-worker boundary. */
+/**
+ * Validates a command before it crosses the launcher-worker boundary.
+ * @param {unknown} value
+ */
 export function runnerCommand(value) {
   const message = messageRecord(value);
   const type = requiredString(message, "type");
@@ -90,7 +98,10 @@ export function runnerCommand(value) {
   throw new TypeError(`Unknown runner command: ${type}`);
 }
 
-/** Validates an event before it crosses the launcher-worker boundary. */
+/**
+ * Validates an event before it crosses the launcher-worker boundary.
+ * @param {unknown} value
+ */
 export function runnerEvent(value) {
   const message = messageRecord(value);
   const type = requiredString(message, "type");

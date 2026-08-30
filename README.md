@@ -93,10 +93,11 @@ Then open http://localhost:8080 in your browser.
 
 ## Checks
 
-Run the test suite and typecheck with:
+Run the test suite, the browser smoke tests and the typecheck with:
 
 ```bash
 node scripts/run-tests.mjs
+scripts/browser-smoke.sh
 scripts/typecheck.sh
 ```
 

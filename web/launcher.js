@@ -25,13 +25,13 @@ import {
 } from "./runner-protocol.js";
 import { createFrameBatcher } from "./terminal-render.js";
 
-const output = document.getElementById("output");
-const input = document.getElementById("input");
-const cursor = document.getElementById("cursor");
-const screen = document.getElementById("screen");
-const terminalContainer = document.getElementById("terminal-container");
-const status = document.getElementById("status");
-const restartButton = document.getElementById("restart-game");
+const output = /** @type {HTMLElement} */ (document.getElementById("output"));
+const input = /** @type {HTMLElement} */ (document.getElementById("input"));
+const cursor = /** @type {HTMLElement} */ (document.getElementById("cursor"));
+const screen = /** @type {HTMLElement} */ (document.getElementById("screen"));
+const terminalContainer = /** @type {HTMLElement} */ (document.getElementById("terminal-container"));
+const status = /** @type {HTMLElement} */ (document.getElementById("status"));
+const restartButton = /** @type {HTMLButtonElement} */ (document.getElementById("restart-game"));
 const terminalInput = /** @type {HTMLInputElement} */ (
   document.getElementById("terminal-input")
 );
@@ -44,10 +44,13 @@ let waitingForInput = false;
 let pendingInputSeparator = false;
 let hasReceivedFirstOutput = false;
 let isCursorActive = false;
+/** @type {Worker | undefined} */
 let worker;
+/** @type {number | undefined} */
 let workerStartupTimer;
 let runId = 0;
 let lastWorkerMessageAt = 0;
+/** @type {number | undefined} */
 let inputResponseTimer;
 const maxStartupRetries = 1;
 const workerStartupTimeoutMs = 15_000;
@@ -56,6 +59,7 @@ const workerStartupTimeoutMs = 15_000;
 // a silent gap after submitting means iOS suspended the process mid-flight.
 const inputResponseTimeoutMs = 2_500;
 
+/** @param {string} text */
 function appendOutput(text) {
   if (!hasReceivedFirstOutput) {
     terminalText = "";
@@ -114,10 +118,13 @@ function cancelOutputRender() {
 const keyboardViewport = window.visualViewport ?? window;
 const usesMobilePointer = window.matchMedia("(pointer: coarse)");
 let previousViewportWidth = keyboardViewport.width ?? window.innerWidth;
+/** @type {number | undefined} */
 let keyboardResizeFrame;
+/** @type {number | undefined} */
 let constrainedTerminalHeight;
 let keyboardClosedViewportHeight =
   keyboardViewport.height ?? window.innerHeight;
+/** @type {number[]} */
 let keyboardCheckTimers = [];
 
 function usesTouchInput() {
@@ -160,7 +167,8 @@ function constrainTerminalAboveKeyboard() {
   keyboardResizeFrame = undefined;
   if (!waitingForInput || document.activeElement !== terminalInput) return;
 
-  const visibleBottom = keyboardViewport.offsetTop + keyboardViewport.height;
+  const visibleBottom =
+    (keyboardViewport.offsetTop ?? 0) + (keyboardViewport.height ?? 0);
   const overlap = terminalActiveLineOverlap(terminalInput, visibleBottom);
   if (!constrainedTerminalHeight && overlap <= 0) return;
 
@@ -207,8 +215,8 @@ function handleKeyboardViewportResize() {
     return;
   }
 
-  const height = keyboardViewport.height;
-  const width = keyboardViewport.width;
+  const height = keyboardViewport.height ?? window.innerHeight;
+  const width = keyboardViewport.width ?? window.innerWidth;
   const widthChanged = Math.abs(width - previousViewportWidth) >= 24;
   previousViewportWidth = width;
 
@@ -288,6 +296,7 @@ function render() {
   }
 }
 
+/** @param {string} message */
 function setStatus(message) {
   status.textContent = message;
   status.hidden = !message;
@@ -409,6 +418,7 @@ function handleTerminalClick() {
 let touchMouseEventPending = false;
 let clickFollowsTouch = false;
 
+/** @param {PointerEvent} event */
 function handleTerminalPointerDown(event) {
   terminalPointerInteraction = true;
   touchMouseEventPending = isTouchPointer(event);
@@ -420,6 +430,7 @@ function handleTerminalPointerCancel() {
   render();
 }
 
+/** @param {MouseEvent} event */
 function handleTerminalMouseDown(event) {
   const followsTouch = touchMouseEventPending;
   touchMouseEventPending = false;
@@ -486,7 +497,9 @@ terminalContainer.addEventListener(
 terminalContainer.addEventListener("mousedown", handleTerminalMouseDown);
 terminalContainer.addEventListener("click", handleTerminalClick);
 
+/** @type {Int32Array | undefined} */
 let sharedBuffer;
+/** @type {Uint8Array | undefined} */
 let sharedKeys;
 const isolationReloadKey = "adventure-isolation-reload";
 
@@ -564,12 +577,19 @@ async function start() {
   launchWorker(buffer, keys, currentRunId);
 }
 
+/**
+ * @param {SharedArrayBuffer} buffer
+ * @param {SharedArrayBuffer} keys
+ * @param {number} currentRunId
+ * @param {number} [attempt]
+ */
 function launchWorker(buffer, keys, currentRunId, attempt = 0) {
   if (currentRunId !== runId) return;
 
-  let activeWorker;
+  /** @type {Worker | undefined} */
+  let createdWorker;
   try {
-    activeWorker = new Worker(new URL("./runner.worker.js", import.meta.url), {
+    createdWorker = new Worker(new URL("./runner.worker.js", import.meta.url), {
       type: "module",
     });
   } catch (error) {
@@ -579,6 +599,8 @@ function launchWorker(buffer, keys, currentRunId, attempt = 0) {
     }
     throw error;
   }
+  if (!createdWorker) return;
+  const activeWorker = createdWorker;
   worker = activeWorker;
   let hasStarted = false;
 
@@ -588,6 +610,7 @@ function launchWorker(buffer, keys, currentRunId, attempt = 0) {
     workerStartupTimer = undefined;
   }
 
+  /** @param {string} message */
   function handleStartupFailure(message) {
     if (worker !== activeWorker) return;
     clearTimeout(workerStartupTimer);
@@ -666,12 +689,26 @@ window.addEventListener("pagehide", () => {
   releaseWorker();
 });
 
+/**
+ * Read-only snapshot for the jsdom smoke tests and debug console use
+ * (scripts/browser-smoke.test.mjs); the launcher itself never reads it.
+ */
+const debugHandle = /** @type {Window & { adventureDebug: { get state(): { worker: Worker | undefined, waitingForInput: boolean, runId: number } } }} */ (
+  /** @type {unknown} */ (window)
+);
+debugHandle.adventureDebug = {
+  get state() {
+    return { worker, waitingForInput, runId };
+  },
+};
+
 window.addEventListener("pageshow", () => {
   if (!interruptedByPageHide) return;
   interruptedByPageHide = false;
   restartGame();
 });
 
+/** @param {Error} error */
 function reportStartError(error) {
   releaseWorker();
   cancelOutputRender();

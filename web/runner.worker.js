@@ -8,8 +8,10 @@
 
 import { readInputLine, runnerCommand, runnerEvent } from "./runner-protocol.js";
 
+/** @type {{ (options: object): Promise<{ callMain: (args: unknown[]) => void }> } | undefined} */
 let createModule;
 
+/** @param {object} message */
 function send(message) {
   self.postMessage(runnerEvent(message));
 }
@@ -33,6 +35,7 @@ self.onmessage = async (event) => {
     // The current input line plus the read cursor into it. `line` is null
     // when the previous line has been fully consumed and a new one must be
     // requested from the launcher.
+    /** @type {string | null} */
     let line = null;
     let linePosition = 0;
     let reachedEof = false;
@@ -78,11 +81,15 @@ self.onmessage = async (event) => {
       return charCode;
     }
 
-    const module = await createModule({
+    const createGameModule = createModule;
+    if (!createGameModule) return;
+    const module = await createGameModule({
       noInitialRun: true,
+      /** @param {any} emscriptenModule */
       preRun: (emscriptenModule) => {
         emscriptenModule.FS.init(
           readStdinChar,
+          /** @param {number} charCode */
           (charCode) => {
             // Emscripten's stdout is line-buffered and every Fortran record
             // ends in a newline, so output arrives promptly without any
@@ -95,6 +102,7 @@ self.onmessage = async (event) => {
               stdoutBuffer += character;
             }
           },
+          /** @param {number} charCode */
           (charCode) => console.warn(String.fromCharCode(charCode)),
         );
       },
