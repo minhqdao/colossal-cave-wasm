@@ -189,26 +189,38 @@
       }
       .terminal-actions a svg {
         fill: none;
+        /* Center-alignment puts the icon at the control's geometric
+           center, while the line box sits ~0.4px below the caps' ink
+           center (ascent space above the caps exceeds the empty descender
+           space of uppercase text). The fractional shift re-centers the
+           arrow on SOURCE's optical middle; a transform is used because
+           fractional margins get grid-snapped. Verified at the pixel level
+           against "Source". */
         margin-left: 5px;
         shape-rendering: crispEdges;
         stroke: currentColor;
         stroke-linecap: butt;
         stroke-linejoin: miter;
         stroke-width: 1;
+        transform: translateY(-0.44px);
       }
       /* iOS Safari does not stretch a <button> flex item to the row's height,
          and the anchor's inline-flex line box contributes height differently
          from the button's (the icon included), leaving the two controls a
-         pixel apart. Pin both to one explicit border-box; the flex display
-         centers label and icon, while line-height keeps a single text line
-         vertically centered even where display:flex on <button> is ignored. */
+         pixel apart. Pin both to one explicit border-box centered by flex. */
       .terminal-actions a,
       .terminal-actions button {
+        align-items: center;
         box-sizing: border-box;
         display: flex;
         height: 32px;
-        line-height: 30px;
+        justify-content: center;
         padding: 0 20px;
+      }
+      /* Fallback centering for engines that ignore display:flex on buttons:
+         the line fills the fixed-height box's content area exactly. */
+      .terminal-actions button {
+        line-height: 30px;
       }
       button {
         --button-transition: 0.18s ease-out;
