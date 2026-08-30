@@ -5,8 +5,9 @@
 // When the prompt is already visible, nothing may scroll: no jank.
 //
 // The jsdom harness mocks a fixed layout (document coordinates, css px):
-// the boot turn leaves the prompt bottom at y=200 (innerHeight is 768),
-// and each streamed block grows the terminal and the document together.
+// the boot turn leaves the terminal panel's bottom edge at y=200
+// (innerHeight is 768), each streamed block grows terminal and document
+// together, and the reveal stops 8px short of the fold.
 //
 // jsdom lives in a scratch node_modules (see scripts/browser-smoke.sh); the
 // test skips gracefully when it has not been installed.
@@ -63,7 +64,7 @@ test("promptJumpTarget: returns null while the prompt is fully visible", () => {
     promptJumpTarget({
       currentScrollY: 0,
       visualHeight: 768,
-      promptBottom: 500,
+      revealBottom: 500,
       maxScroll: 3000,
     }),
     null,
@@ -73,7 +74,7 @@ test("promptJumpTarget: returns null while the prompt is fully visible", () => {
     promptJumpTarget({
       currentScrollY: 0,
       visualHeight: 768,
-      promptBottom: 768,
+      revealBottom: 768,
       maxScroll: 3000,
     }),
     null,
@@ -85,7 +86,7 @@ test("promptJumpTarget: below the fold aligns the prompt to the fold", () => {
     promptJumpTarget({
       currentScrollY: 0,
       visualHeight: 768,
-      promptBottom: 1000,
+      revealBottom: 1000,
       maxScroll: 3000,
     }),
     1000 - 768,
@@ -99,7 +100,7 @@ test("promptJumpTarget: a keyboard-shrunk viewport counts as hidden", () => {
       currentScrollY: 0,
       visualTopOffsetTop: 88,
       visualHeight: 420,
-      promptBottom: 600,
+      revealBottom: 600,
       maxScroll: 3000,
     }),
     600 - 88 - 420,
@@ -111,10 +112,36 @@ test("promptJumpTarget: never scrolls past the document bottom", () => {
     promptJumpTarget({
       currentScrollY: 0,
       visualHeight: 768,
-      promptBottom: 5000,
+      revealBottom: 5000,
       maxScroll: 4200,
     }),
     4200,
+  );
+});
+
+test("promptJumpTarget: reveal padding is the buffer before a jump", () => {
+  // Terminal bottom at y=760 with 8px padding: the fold (768) still has
+  // room for it -> visible, no jump.
+  assert.equal(
+    promptJumpTarget({
+      currentScrollY: 0,
+      visualHeight: 768,
+      revealBottom: 760,
+      revealPadding: 8,
+      maxScroll: 3000,
+    }),
+    null,
+  );
+  // One pixel lower and the jump includes the padding in the target.
+  assert.equal(
+    promptJumpTarget({
+      currentScrollY: 0,
+      visualHeight: 768,
+      revealBottom: 761,
+      revealPadding: 8,
+      maxScroll: 3000,
+    }),
+    761 + 8 - 768,
   );
 });
 
@@ -165,7 +192,7 @@ if (JSDOM) {
     });
 
     const layout = {
-      promptBottom: 200,
+      revealBottom: 200,
       documentHeight: 500,
     };
     const rect = (top, bottom) => ({
@@ -180,8 +207,8 @@ if (JSDOM) {
       toJSON() {},
     });
     window.Element.prototype.getBoundingClientRect = function () {
-      if (this === document.getElementById("input")) {
-        return rect(layout.promptBottom - 17, layout.promptBottom);
+      if (this === document.getElementById("screen")) {
+        return rect(200 - 17, layout.revealBottom); // top irrelevant here
       }
       return rect(0, 0);
     };
@@ -253,9 +280,9 @@ if (JSDOM) {
 
     const worker = window.adventureDebug.state.worker;
 
-    /** One game turn: grow the prompt line by `blockHeight` px, finish it. */
+    /** One game turn: grow the transcript by `blockHeight` px, finish it. */
     const takeTurn = async (blockHeight) => {
-      layout.promptBottom += blockHeight;
+      layout.revealBottom += blockHeight;
       layout.documentHeight += blockHeight;
       worker.emit({ type: "STDOUT", text: `x`.repeat(blockHeight) });
       worker.emit({ type: "REQUEST_INPUT" });
@@ -296,19 +323,19 @@ if (JSDOM) {
 
   test("turns whose prompt stays on screen never scroll the page", async () => {
     const { takeTurn, scrollToCalls } = await openPromptJumpPage();
-    await takeTurn(300); // prompt bottom 500, above the 768 fold
-    await takeTurn(250); // ...and so on while everything fits
+    await takeTurn(300); // terminal bottom 500 (+8 pad), above the 768 fold
+    await takeTurn(250); // ...and so on while everything still fits
     assert.deepEqual(scrollToCalls, []);
   });
 
   test("the first turn that pushes the prompt past the fold jumps once", async () => {
     const { takeTurn, scrollToCalls, layout } = await openPromptJumpPage();
-    await takeTurn(700); // prompt bottom 900 > 768
-    assert.deepEqual(scrollToCalls, [900 - 768]);
+    await takeTurn(700); // terminal bottom 900 + 8 pad > 768
+    assert.deepEqual(scrollToCalls, [900 + 8 - 768]);
     // A further turn re-evaluates from scratch (scrollY stays mocked at 0,
-    // so the new prompt bottom simply needs more of a jump).
+    // so the new terminal bottom simply needs more of a jump).
     await takeTurn(100);
-    assert.deepEqual(scrollToCalls, [900 - 768, 1000 - 768]);
+    assert.deepEqual(scrollToCalls, [900 + 8 - 768, 1000 + 8 - 768]);
   });
 
   test("prompt hidden under an already-open keyboard jumps to its top edge", async () => {
@@ -319,10 +346,10 @@ if (JSDOM) {
     // The boot-turn reveal already reserves the keyboard slice -- always
     // harmless: it sits at the document bottom, i.e. behind the keyboard.
     assert.equal(spacerHeight(), 260);
-    await takeTurn(350); // prompt bottom 550: on-screen layout-wise...
+    await takeTurn(350); // terminal bottom 550: on-screen layout-wise...
     // ...but under the keyboard: without the spacer, maxScroll (850-768)
-    // would clamp the jump to 82 and leave the prompt still covered.
-    assert.deepEqual(scrollToCalls, [550 - 88 - 420]);
+    // would clamp the jump short and leave the prompt still covered.
+    assert.deepEqual(scrollToCalls, [550 + 8 - 88 - 420]);
   });
 
   test("a keyboard that opens after the turn re-reveals the prompt", async () => {
@@ -330,17 +357,17 @@ if (JSDOM) {
     // over the prompt line asynchronously.
     const { takeTurn, scrollToCalls, spacerHeight, openKeyboard } =
       await openPromptJumpPage({ viewport: { height: 768, offsetTop: 0 } });
-    await takeTurn(350); // prompt bottom 550 < 768 fold: no jump yet
+    await takeTurn(350); // terminal bottom 550 (+8) < 768 fold: no jump yet
     assert.deepEqual(scrollToCalls, []);
     await openKeyboard(420); // keyboard 348px tall covers the prompt
-    assert.deepEqual(scrollToCalls, [550 - 420]);
+    assert.deepEqual(scrollToCalls, [550 + 8 - 420]);
     assert.equal(spacerHeight(), 768 - 420);
   });
 
   test("no viewport API (desktop) never reserves space or scrolls", async () => {
     const { takeTurn, scrollToCalls, spacerHeight } = await openPromptJumpPage();
     await takeTurn(700); // normal past-fold jump still works...
-    assert.deepEqual(scrollToCalls, [900 - 768]);
+    assert.deepEqual(scrollToCalls, [900 + 8 - 768]);
     assert.equal(spacerHeight(), 0); // ...without any keyboard spacer
   });
 }

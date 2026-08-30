@@ -173,13 +173,17 @@ function applyKeyboardSpace() {
   return height;
 }
 
+/** Space kept between the terminal panel's bottom edge and the fold. */
+const REVEAL_PADDING = 8;
+
 /**
- * When the game finishes a turn, jump the page to the bottom if -- and
- * only if -- the prompt line is not fully visible: below the fold, or
- * above it but hidden under the soft keyboard. The jump lands on the
- * keyboard's top edge (the fold), never underneath it, mirroring the
- * browser's own keyboard reveal once the user starts typing. Nothing
- * scrolls while the prompt is already fully on screen.
+ * When the game finishes a turn, jump the page down if -- and only if --
+ * the terminal panel's bottom edge is not fully visible: below the fold,
+ * or above it but hidden under the soft keyboard. The jump lands the
+ * panel edge (plus a small reveal padding) on the keyboard's top edge,
+ * so the cursor is never flush against it, mirroring the browser's own
+ * keyboard reveal once the user starts typing. Nothing scrolls while the
+ * terminal is already fully on screen.
  *
  * Measured two frames late: the block was painted in the same task and
  * the layout can still shift underneath (web-font swap re-wraps lines),
@@ -195,7 +199,8 @@ function revealPromptIfHidden() {
       currentScrollY: window.scrollY,
       visualTopOffsetTop,
       visualHeight,
-      promptBottom: input.getBoundingClientRect().bottom + window.scrollY,
+      revealBottom: screen.getBoundingClientRect().bottom + window.scrollY,
+      revealPadding: REVEAL_PADDING,
       maxScroll: Math.max(
         0,
         document.documentElement.scrollHeight - window.innerHeight,
