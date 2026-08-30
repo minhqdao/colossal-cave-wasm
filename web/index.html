@@ -194,6 +194,10 @@
          font family, which is what made the icon drift. */
       .terminal-actions a svg {
         fill: none;
+        /* No literal whitespace between label and icon in the markup:
+           in inline flow it would render as a full Courier space (~8px).
+           A fixed margin reproduces the original gap exactly. */
+        margin-left: 4px;
         shape-rendering: crispEdges;
         stroke: currentColor;
         stroke-linecap: butt;
@@ -371,8 +375,7 @@
           target="_blank"
           rel="noopener noreferrer"
         >
-          Source
-          <svg
+          Source<svg
             aria-hidden="true"
             width="8"
             height="8"
