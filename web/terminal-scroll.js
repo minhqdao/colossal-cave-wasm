@@ -30,23 +30,21 @@ export function keyboardHeight({
 }
 
 /**
- * Bottom-most scroll position (in document coordinates) that brings the
- * terminal's bottom edge up to the fold -- used on mobile page-scroll
- * layouts where the whole document is the scrollable surface. The fold is
- * the visual viewport's bottom edge: the window bottom while the keyboard
- * is closed, its top edge while open. A small reveal padding keeps a
- * breath of space between the terminal edge and the fold, so the cursor
- * never sits flush against the screen or keyboard boundary.
+ * Bottom-most scroll position (in document
+ * coordinates) that raises the cursor to a fixed distance above the fold
+ * -- used on mobile page-scroll layouts where the whole document is the
+ * scrollable surface. The fold is the visual viewport's bottom edge: the
+ * window bottom while the keyboard is closed, its top edge while open.
  *
  * @param {Object} viewport
  * @param {number} viewport.currentScrollY scroll offset of the layout viewport
  * @param {number} viewport.visualTopOffsetTop visual viewport inset below the layout viewport top (keyboard pan)
  * @param {number} viewport.visualHeight visual viewport height (smaller than the window while the keyboard is open)
- * @param {number} viewport.revealBottom document y of the bottom edge to reveal (the terminal panel)
- * @param {number} [viewport.revealPadding] space kept below the revealed edge before the fold
+ * @param {number} viewport.revealBottom document y of the cursor line's bottom edge
+ * @param {number} [viewport.revealPadding] space kept below the cursor before the fold
  * @param {number} viewport.maxScroll largest scroll offset the document allows
  * @returns {number | null} new layout scrollY for the jump, or
- *   null when the terminal edge + padding is already fully visible.
+ *   null when the cursor + padding is already fully visible.
  */
 export function promptJumpTarget({
   currentScrollY,
@@ -58,12 +56,10 @@ export function promptJumpTarget({
 }) {
   const fold = currentScrollY + visualTopOffsetTop + visualHeight;
   if (revealBottom + revealPadding <= fold) return null;
-  // Jump exactly far enough for the terminal bottom (plus the reveal
-  // padding) to land on the fold. The browser itself clamps a scrollTo
-  // past the scrollable area, and a short layout viewport (Android)
-  // simply has more scrollable room, so the keyboard reveal
-  // "bottom + keyboard height" works out to the same fold-aligned number
-  // on both platforms.
+  // Jump exactly far enough for the cursor (plus the reveal padding) to
+  // land on the fold. On Android the keyboard shrinks the layout
+  // viewport, so aligning the cursor to that fold is "bottom + keyboard
+  // height" in window terms already.
   return Math.min(
     Math.max(0, revealBottom + revealPadding - visualTopOffsetTop - visualHeight),
     maxScroll,
