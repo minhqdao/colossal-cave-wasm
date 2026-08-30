@@ -13,18 +13,31 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { join } from "node:path";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
 
-let JSDOM;
-try {
-  ({ JSDOM } = require("jsdom"));
-} catch {
+// jsdom is installed into a scratch directory that scripts/browser-smoke.sh
+// points at with $SMOKE_NODE_MODULES, so no package.json or node_modules has
+// to exist inside the repository.
+function resolveJSDOM() {
+  const scratch = process.env.SMOKE_NODE_MODULES;
+  if (!scratch) return null;
+  try {
+    return require(join(scratch, "jsdom")).JSDOM;
+  } catch {
+    return null;
+  }
+}
+
+const JSDOM = resolveJSDOM();
+
+if (!JSDOM) {
   console.warn(
-    "browser-smoke.test.mjs skipped: run scripts/browser-smoke.sh (installs jsdom locally)",
+    "browser-smoke.test.mjs skipped: run scripts/browser-smoke.sh (installs jsdom into a scratch cache directory)",
   );
-  test("jsdom is not installed", { skip: true }, () => {});
+  test("jsdom scratch install missing", { skip: true }, () => {});
 }
 
 if (JSDOM) {

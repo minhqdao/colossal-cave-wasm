@@ -82,10 +82,19 @@ cat src/adventure.f src/adventure_shims.f > "$BUILD_DIR/adventure_all.f"
 "$LFORTRAN" -c "${FFLAGS[@]}" -J "$BUILD_DIR" \
     "$BUILD_DIR/adventure_all.f" -o "$BUILD_DIR/adventure_all.o"
 
+# 16 MB initial / 128 MB max grown memory: iOS refuses large eager
+# allocations under WebContent memory pressure (a 256 MB fixed segment
+# aborts on reload with "RangeError: Out of memory"), while the game's
+# linear memory never approaches even the grown 16 MB start. The 8 MB
+# stack is bounded by measurement: full regression suite passes with
+# stack-overflow guards enabled at 64 KB, so it carries >100x headroom.
 "$EMCC" \
     --target=wasm32-unknown-emscripten \
-    -sSTACK_SIZE=50mb \
-    -sINITIAL_MEMORY=256mb \
+    -sSTACK_SIZE=8mb \
+    -sINITIAL_MEMORY=16mb \
+    -sMAXIMUM_MEMORY=128mb \
+    -sALLOW_MEMORY_GROWTH=1 \
+    -sSTACK_OVERFLOW_CHECK=1 \
     -sEXIT_RUNTIME=1 \
     -sMODULARIZE \
     -sEXPORT_ES6 \

@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 # Runs the jsdom-based browser smoke tests for web/launcher.js without
-# adding a package.json: jsdom lands in a gitignored scratch folder under
-# scripts/ and the test itself requires it from there.
+# adding a package.json and without putting anything in the repository:
+# jsdom lives in a cache directory outside the working tree (override with
+# $SMOKE_HOME) and the test finds it through $SMOKE_NODE_MODULES.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-if [ ! -d scripts/node_modules/jsdom ]; then
-  echo "installing jsdom into scripts/node_modules (one time)..."
-  npm install --no-save --no-package-lock --prefix scripts --silent jsdom@26
+SMOKE_HOME="${SMOKE_HOME:-$HOME/.cache/colossal-cave-wasm/jsdom-smoke}"
+
+if [ ! -d "$SMOKE_HOME/node_modules/jsdom" ]; then
+  echo "installing jsdom into $SMOKE_HOME (one time)..."
+  mkdir -p "$SMOKE_HOME"
+  npm install --no-save --no-package-lock --prefix "$SMOKE_HOME" --silent jsdom@26
 fi
 
-exec node --test scripts/browser-smoke.test.mjs "$@"
+SMOKE_NODE_MODULES="$SMOKE_HOME/node_modules" exec node --test scripts/browser-smoke.test.mjs "$@"
