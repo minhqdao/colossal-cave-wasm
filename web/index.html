@@ -196,6 +196,20 @@
         stroke-linejoin: miter;
         stroke-width: 1;
       }
+      /* iOS Safari does not stretch a <button> flex item to the row's height,
+         and the anchor's inline-flex line box contributes height differently
+         from the button's (the icon included), leaving the two controls a
+         pixel apart. Pin both to one explicit border-box; the flex display
+         centers label and icon, while line-height keeps a single text line
+         vertically centered even where display:flex on <button> is ignored. */
+      .terminal-actions a,
+      .terminal-actions button {
+        box-sizing: border-box;
+        display: flex;
+        height: 32px;
+        line-height: 30px;
+        padding: 0 20px;
+      }
       button {
         --button-transition: 0.18s ease-out;
         -webkit-appearance: none;
