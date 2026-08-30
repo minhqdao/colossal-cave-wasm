@@ -11,9 +11,30 @@ export function scrollTerminalToBottom(screen) {
 }
 
 /**
+ * Height of the soft keyboard: the slice of the layout viewport the visual
+ * viewport cannot see. Zero on desktop and on Android Chrome (whose
+ * keyboard resizes the layout viewport instead of covering it), hundreds
+ * of pixels on iOS.
+ *
+ * @param {Object} viewport
+ * @param {number} viewport.innerHeight layout viewport height
+ * @param {number} viewport.visualHeight visual viewport height
+ * @param {number} [viewport.visualTopOffsetTop] visual viewport offset from the layout viewport top
+ */
+export function keyboardHeight({
+  innerHeight,
+  visualHeight,
+  visualTopOffsetTop = 0,
+}) {
+  return Math.max(0, innerHeight - visualTopOffsetTop - visualHeight);
+}
+
+/**
  * Bottom-most scroll position (in document coordinates) that brings the
  * prompt line fully above the fold -- used on mobile page-scroll layouts
- * where the whole document is the scrollable surface.
+ * where the whole document is the scrollable surface. The fold is the
+ * visual viewport's bottom edge, i.e. the top edge of the soft keyboard
+ * while it is open.
  *
  * @param {Object} viewport
  * @param {number} viewport.currentScrollY scroll offset of the layout viewport
@@ -33,9 +54,11 @@ export function promptJumpTarget({
 }) {
   const fold = currentScrollY + visualTopOffsetTop + visualHeight;
   if (promptBottom <= fold) return null;
-  // Jump exactly far enough for the prompt bottom to land on the fold;
-  // clamp to the document bottom (a short document cannot scroll further,
-  // which mirrors what the browser itself does when typing).
+  // Jump exactly far enough for the prompt bottom to land on the fold.
+  // The browser itself clamps a scrollTo past the scrollable area, and a
+  // short layout viewport (Android) simply has more scrollable room, so
+  // the keyboard reveal "bottom + keyboard height" works out to the same
+  // fold-aligned number on both platforms.
   return Math.min(
     Math.max(0, promptBottom - visualTopOffsetTop - visualHeight),
     maxScroll,

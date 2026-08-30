@@ -10,6 +10,7 @@ import {
 } from "./terminal-output.js";
 import { isTouchPointer, moveInputCaretToEnd } from "./terminal-input.js";
 import {
+  keyboardHeight,
   promptJumpTarget,
   scrollTerminalToBottom,
 } from "./terminal-scroll.js";
@@ -146,12 +147,39 @@ function needsSoftKeyboardFocus() {
 }
 
 /**
+ * Height of a visible soft keyboard (0 while closed; 0 on Android Chrome,
+ * whose keyboard resizes the layout viewport instead of covering it).
+ */
+function measureKeyboardHeight() {
+  const viewport = window.visualViewport;
+  return keyboardHeight({
+    innerHeight: window.innerHeight,
+    visualHeight: viewport?.height ?? window.innerHeight,
+    visualTopOffsetTop: viewport?.offsetTop ?? 0,
+  });
+}
+
+/**
+ * Keep the bottom of the document scrollable up to the keyboard's top
+ * edge. A page-scroll document ends at the window bottom, so without this
+ * reserve the jump could never lift the prompt out from under an open
+ * keyboard on iOS -- "bottom" simply stops short. The padding disappears
+ * again the moment the keyboard closes.
+ */
+function applyKeyboardSpace() {
+  const height = measureKeyboardHeight();
+  document.documentElement.style.paddingBottom =
+    height > 0 ? `${height}px` : "";
+  return height;
+}
+
+/**
  * When the game finishes a turn, jump the page to the bottom if -- and
  * only if -- the prompt line is not fully visible: below the fold, or
- * above it but hidden under the soft keyboard. This mirrors the browser's
- * own keyboard reveal once the user starts typing, so waiting for input
- * never leaves the user staring at content they cannot act on, and never
- * scrolls when the whole prompt is already on screen.
+ * above it but hidden under the soft keyboard. The jump lands on the
+ * keyboard's top edge (the fold), never underneath it, mirroring the
+ * browser's own keyboard reveal once the user starts typing. Nothing
+ * scrolls while the prompt is already fully on screen.
  *
  * Measured two frames late: the block was painted in the same task and
  * the layout can still shift underneath (web-font swap re-wraps lines),
@@ -159,6 +187,7 @@ function needsSoftKeyboardFocus() {
  */
 function revealPromptIfHidden() {
   const jump = () => {
+    applyKeyboardSpace();
     const viewport = window.visualViewport;
     const visualHeight = viewport?.height ?? window.innerHeight;
     const visualTopOffsetTop = viewport?.offsetTop ?? 0;
@@ -186,6 +215,21 @@ function revealPromptIfHidden() {
   } else {
     settle();
   }
+}
+
+let lastKeyboardHeight = measureKeyboardHeight();
+if (window.visualViewport) {
+  // iOS opens the soft keyboard asynchronously after the game asks for
+  // input, so the turn-end measurement can happen while the keyboard is
+  // still closed and the prompt looks fine. When it then rises over the
+  // prompt, redo the reveal against the new fold.
+  window.visualViewport.addEventListener("resize", () => {
+    const height = measureKeyboardHeight();
+    const previous = lastKeyboardHeight;
+    lastKeyboardHeight = height;
+    applyKeyboardSpace();
+    if (height > previous && waitingForInput) revealPromptIfHidden();
+  });
 }
 
 document.addEventListener(

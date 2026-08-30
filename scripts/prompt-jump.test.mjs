@@ -19,7 +19,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import test from "node:test";
 
-import { promptJumpTarget } from "../web/terminal-scroll.js";
+import { keyboardHeight, promptJumpTarget } from "../web/terminal-scroll.js";
 
 const require = createRequire(import.meta.url);
 
@@ -34,6 +34,29 @@ function resolveJSDOM() {
 }
 
 const JSDOM = resolveJSDOM();
+
+test("keyboardHeight: covers window minus visual viewport", () => {
+  assert.equal(
+    keyboardHeight({ innerHeight: 768, visualHeight: 768 }),
+    0, // closed, or Android Chrome (keyboard resizes the layout viewport)
+  );
+  assert.equal(
+    keyboardHeight({
+      innerHeight: 844,
+      visualHeight: 600,
+      visualTopOffsetTop: 44,
+    }),
+    200,
+  );
+  assert.equal(
+    keyboardHeight({
+      innerHeight: 768,
+      visualHeight: 420,
+      visualTopOffsetTop: 88,
+    }),
+    260,
+  );
+});
 
 test("promptJumpTarget: returns null while the prompt is fully visible", () => {
   assert.equal(
@@ -123,12 +146,22 @@ if (JSDOM) {
       addEventListener() {},
       removeEventListener() {},
     });
-    // jsdom's innerHeight (768) is the layout viewport; `viewport` models
-    // the visual viewport (e.g. {{ height: 420, offsetTop: 88 }} with the
-    // soft keyboard open).
+    // jsdom's innerHeight (768) is the layout viewport; `viewport` (plain
+    // { height, offsetTop } with mutable fields) models the visual
+    // viewport, e.g. { height: 420, offsetTop: 88 } with the keyboard open.
+    const viewportListeners = [];
+    const registeredViewport = viewport
+      ? {
+          ...viewport,
+          addEventListener(_type, callback) {
+            viewportListeners.push(callback);
+          },
+          removeEventListener() {},
+        }
+      : undefined;
     Object.defineProperty(window, "visualViewport", {
       configurable: true,
-      value: viewport,
+      value: registeredViewport,
     });
 
     const layout = {
@@ -154,7 +187,12 @@ if (JSDOM) {
     };
     Object.defineProperty(document.documentElement, "scrollHeight", {
       configurable: true,
-      get: () => layout.documentHeight,
+      // The keyboard spacer (padding-bottom) genuinely grows the
+      // scrollable area; mirror that so jump targets see a realistic
+      // maxScroll while the keyboard is open.
+      get: () =>
+        layout.documentHeight +
+        (parseFloat(document.documentElement.style.paddingBottom) || 0),
     });
 
     const scrollToCalls = [];
@@ -225,7 +263,26 @@ if (JSDOM) {
       await settleJump(window);
     };
 
-    return { window, takeTurn, scrollToCalls, layout };
+    const spacerHeight = () =>
+      parseFloat(document.documentElement.style.paddingBottom) || 0;
+
+    /** Simulate the soft keyboard rising: mutate the mock, then fire resize. */
+    const openKeyboard = async (height, offsetTop = 0) => {
+      registeredViewport.height = height;
+      registeredViewport.offsetTop = offsetTop;
+      for (const listener of viewportListeners) listener();
+      await settleJump(window);
+      await settleJump(window); // the reveal is re-scheduled, allow extra frames
+    };
+
+    return {
+      window,
+      takeTurn,
+      scrollToCalls,
+      layout,
+      spacerHeight,
+      openKeyboard,
+    };
   }
 
   // The jump applies on the second animation frame after the turn ends.
@@ -254,18 +311,36 @@ if (JSDOM) {
     assert.deepEqual(scrollToCalls, [900 - 768, 1000 - 768]);
   });
 
-  test("prompt hidden under the keyboard jumps to the keyboard top edge", async () => {
-    // Visual viewport shrunk by the keyboard: layout 768 stays, but only
-    // y=88..508 are actually visible.
-    const { takeTurn, scrollToCalls } = await openPromptJumpPage({
-      viewport: {
-        height: 420,
-        offsetTop: 88,
-        addEventListener() {},
-        removeEventListener() {},
-      },
+  test("prompt hidden under an already-open keyboard jumps to its top edge", async () => {
+    // Keyboard open at turn end: layout stays 768, only y=88..508 visible.
+    const { takeTurn, scrollToCalls, spacerHeight } = await openPromptJumpPage({
+      viewport: { height: 420, offsetTop: 88 },
     });
+    // The boot-turn reveal already reserves the keyboard slice -- always
+    // harmless: it sits at the document bottom, i.e. behind the keyboard.
+    assert.equal(spacerHeight(), 260);
     await takeTurn(350); // prompt bottom 550: on-screen layout-wise...
-    assert.deepEqual(scrollToCalls, [550 - 88 - 420]); // ...but under the keyboard
+    // ...but under the keyboard: without the spacer, maxScroll (850-768)
+    // would clamp the jump to 82 and leave the prompt still covered.
+    assert.deepEqual(scrollToCalls, [550 - 88 - 420]);
+  });
+
+  test("a keyboard that opens after the turn re-reveals the prompt", async () => {
+    // The turn ended while everything fit; iOS then raises the keyboard
+    // over the prompt line asynchronously.
+    const { takeTurn, scrollToCalls, spacerHeight, openKeyboard } =
+      await openPromptJumpPage({ viewport: { height: 768, offsetTop: 0 } });
+    await takeTurn(350); // prompt bottom 550 < 768 fold: no jump yet
+    assert.deepEqual(scrollToCalls, []);
+    await openKeyboard(420); // keyboard 348px tall covers the prompt
+    assert.deepEqual(scrollToCalls, [550 - 420]);
+    assert.equal(spacerHeight(), 768 - 420);
+  });
+
+  test("no viewport API (desktop) never reserves space or scrolls", async () => {
+    const { takeTurn, scrollToCalls, spacerHeight } = await openPromptJumpPage();
+    await takeTurn(700); // normal past-fold jump still works...
+    assert.deepEqual(scrollToCalls, [900 - 768]);
+    assert.equal(spacerHeight(), 0); // ...without any keyboard spacer
   });
 }
