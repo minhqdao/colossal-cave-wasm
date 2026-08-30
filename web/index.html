@@ -189,20 +189,12 @@
       }
       .terminal-actions a svg {
         fill: none;
-        /* Center-alignment puts the icon at the control's geometric
-           center, while the line box sits ~0.4px below the caps' ink
-           center (ascent space above the caps exceeds the empty descender
-           space of uppercase text). The fractional shift re-centers the
-           arrow on SOURCE's optical middle; a transform is used because
-           fractional margins get grid-snapped. Verified at the pixel level
-           against "Source". */
         margin-left: 5px;
         shape-rendering: crispEdges;
         stroke: currentColor;
         stroke-linecap: butt;
         stroke-linejoin: miter;
         stroke-width: 1;
-        transform: translateY(-0.44px);
       }
       /* iOS Safari does not stretch a <button> flex item to the row's height,
          and the anchor's inline-flex line box contributes height differently
