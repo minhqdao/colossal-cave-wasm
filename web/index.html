@@ -23,7 +23,11 @@
     <link rel="icon" type="image/png" href="./favicon-16.png" sizes="16x16" />
     <link rel="icon" type="image/png" href="./favicon-32.png" sizes="32x32" />
     <link rel="icon" type="image/png" href="./favicon-64.png" sizes="64x64" />
-    <link rel="apple-touch-icon" href="./apple-touch-icon.png" sizes="180x180" />
+    <link
+      rel="apple-touch-icon"
+      href="./apple-touch-icon.png"
+      sizes="180x180"
+    />
     <!--
       The launcher uses SharedArrayBuffer to stream keyboard input into a Web
       Worker that runs the WASM module, which requires cross-origin isolation.
@@ -197,7 +201,7 @@
         /* No literal whitespace between label and icon in the markup:
            in inline flow it would render as a full Courier space (~8px).
            A fixed margin reproduces the original gap exactly. */
-        margin-left: 4px;
+        margin-left: 6px;
         shape-rendering: crispEdges;
         stroke: currentColor;
         stroke-linecap: butt;
@@ -432,9 +436,9 @@
             if (document.documentElement.dataset.adventureBootDone) return;
             var hadMessage = Boolean(
               event.message &&
-                // Module scripts report instantiation errors on window;
-                // resource load errors carry the failed element instead.
-                !(event.target && event.target !== window),
+              // Module scripts report instantiation errors on window;
+              // resource load errors carry the failed element instead.
+              !(event.target && event.target !== window),
             );
             if (!hadMessage) {
               showBootStatus(
@@ -450,9 +454,7 @@
             // "do not reload", which is the safe direction.
             var retriedThisSession = false;
             try {
-              retriedThisSession = Boolean(
-                sessionStorage.getItem(recoveryKey),
-              );
+              retriedThisSession = Boolean(sessionStorage.getItem(recoveryKey));
             } catch {
               retriedThisSession = true;
             }
