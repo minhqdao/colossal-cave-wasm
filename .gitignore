@@ -4,6 +4,8 @@
 .idea/
 
 build/
+dist/
+node_modules/
 *.mod
 *.bc
 *.ll

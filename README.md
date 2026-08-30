@@ -91,6 +91,31 @@ node scripts/dev-server.mjs 8080
 
 Then open http://localhost:8080 in your browser.
 
+### Deploy Bundle
+
+GitHub Pages caches every file with a fixed `max-age=600`, so deploying the
+multi-file `web/` module graph lets a reload mix a stale entry module with
+fresh siblings and fail module instantiation before any launcher code runs.
+`scripts/bundle-web.sh` (run by CI for the Pages deployment) collapses the
+launcher and worker import graphs into single self-contained files in `dist/`
+and references the entry with a per-deploy `?v=<build-id>` query, making each
+page load atomically one deploy. It needs `esbuild` on `PATH` or in
+`$ESBUILD`; CI installs it with
+`npm install --no-save --no-package-lock esbuild@0.25.10`.
+
+To preview and verify the exact deployment locally:
+
+```bash
+scripts/bundle-web.sh --out dist
+node scripts/check-bundle.test.mjs dist        # bundle integrity
+node scripts/dev-server.mjs 8080 dist          # serve the deploy bundle
+node --test scripts/e2e-bundle.test.mjs        # boot dist/ in headless Chrome
+```
+
+`e2e-bundle.test.mjs` starts and stops its own dev server and finds Chrome via
+`$CHROME`, standard macOS app paths, or `google-chrome`/`chromium` on `PATH`;
+it skips with a reason when Chrome or `dist/` is absent.
+
 ## Checks
 
 Run the test suite, the browser smoke tests and the typecheck with:

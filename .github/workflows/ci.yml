@@ -114,6 +114,12 @@ jobs:
       - name: WASM regression suite (with native parity)
         run: node scripts/run-tests.mjs
 
+      - name: Verify deploy bundle
+        run: |
+          npm install --no-save --no-package-lock --prefix . esbuild@0.25.10
+          ESBUILD=node_modules/.bin/esbuild scripts/bundle-web.sh --out dist
+          node scripts/check-bundle.test.mjs dist
+
       - name: Upload WASM artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -146,13 +152,29 @@ jobs:
           name: wasm-build
           path: web
 
+      # GH Pages caches every file with a fixed max-age=600. Deploying the
+      # modular web/ sources lets a reload mix a cached entry module with
+      # fresh siblings, which kills the module graph ("Importing binding
+      # name ... is not found") before the launcher can report anything.
+      # bundle-web.sh collapses the graphs into single-file bundles with a
+      # build-id query, so each page load is atomically one deploy.
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Bundle web deploy
+        run: |
+          npm install --no-save --no-package-lock --prefix . esbuild@0.25.10
+          ESBUILD=node_modules/.bin/esbuild scripts/bundle-web.sh --out dist
+
       - name: Configure Pages
         uses: actions/configure-pages@v6
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5
         with:
-          path: web
+          path: dist
 
       - name: Deploy to GitHub Pages
         id: deployment
