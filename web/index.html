@@ -167,18 +167,14 @@
         margin-top: 12px;
       }
       .terminal-actions a {
-        align-items: center;
-        display: inline-flex;
         -webkit-appearance: none;
         appearance: none;
         border: 1px solid rgba(200, 248, 200, 0.25);
         border-radius: 6px;
         color: rgba(200, 248, 200, 0.65);
         font-size: 14px;
-        justify-content: center;
         letter-spacing: 0.08em;
         outline: 0;
-        padding: 7px 20px;
         text-decoration: none;
         text-transform: uppercase;
         transition:
@@ -187,32 +183,35 @@
           color 0.18s ease-out,
           text-shadow 0.18s ease-out;
       }
+      /* The arrow stands ON the text's baseline, like any glyph: an inline
+         replaced element's baseline is its bottom edge, so SOURCE and the
+         icon share the one vertical anchor every platform agrees on, and
+         the 8px box spans roughly the caps' 8px height -- center-to-center
+         drift is impossible by construction. Box-center alignment (flex,
+         vertical-align middle) instead anchors to the line box center,
+         (ascent - descent) / 2 above the baseline where caps center at
+         cap-height / 2: numbers that differ per platform for the same
+         font family, which is what made the icon drift. */
       .terminal-actions a svg {
         fill: none;
-        margin-left: 5px;
         shape-rendering: crispEdges;
         stroke: currentColor;
         stroke-linecap: butt;
         stroke-linejoin: miter;
         stroke-width: 1;
+        vertical-align: baseline;
       }
-      /* iOS Safari does not stretch a <button> flex item to the row's height,
-         and the anchor's inline-flex line box contributes height differently
-         from the button's (the icon included), leaving the two controls a
-         pixel apart. Pin both to one explicit border-box centered by flex. */
+      /* Both controls are the same fixed-height box with the label centered
+         by line-height: no flex, because iOS Safari does not stretch a
+         flex-item <button>, and the shared box geometry keeps the two
+         controls' heights equal by construction. */
       .terminal-actions a,
       .terminal-actions button {
-        align-items: center;
         box-sizing: border-box;
-        display: flex;
         height: 32px;
-        justify-content: center;
-        padding: 0 20px;
-      }
-      /* Fallback centering for engines that ignore display:flex on buttons:
-         the line fills the fixed-height box's content area exactly. */
-      .terminal-actions button {
         line-height: 30px;
+        padding: 0 20px;
+        text-align: center;
       }
       button {
         --button-transition: 0.18s ease-out;
@@ -375,12 +374,12 @@
           Source
           <svg
             aria-hidden="true"
-            width="9"
-            height="9"
-            viewBox="0 0 9 9"
+            width="8"
+            height="8"
+            viewBox="0 0 8 8"
             focusable="false"
           >
-            <path d="M1 8 L8 1 M8 1 H4 M8 1 V5" />
+            <path d="M1 7 L7 1 M7 1 H3 M7 1 V5" />
           </svg>
         </a>
       </div>
