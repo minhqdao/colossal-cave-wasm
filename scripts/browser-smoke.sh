@@ -14,4 +14,7 @@ if [ ! -d "$SMOKE_HOME/node_modules/jsdom" ]; then
   npm install --no-save --no-package-lock --prefix "$SMOKE_HOME" --silent jsdom@26
 fi
 
-SMOKE_NODE_MODULES="$SMOKE_HOME/node_modules" exec node --test scripts/browser-smoke.test.mjs "$@"
+SMOKE_NODE_MODULES="$SMOKE_HOME/node_modules" exec node --test \
+    scripts/browser-smoke.test.mjs \
+    scripts/boot-guard.test.mjs \
+    "$@"

@@ -367,6 +367,106 @@
         </a>
       </div>
     </main>
+    <script>
+      // Boot-phase guard. index.html only paints a static "LOADING..." line;
+      // every dynamic state is owned by launcher.js. Before it (or the worker
+      // graph behind it) finishes loading, no launcher code exists to report
+      // anything, so failures here would otherwise leave the terminal stuck
+      // on LOADING... forever. Three independent nets:
+      //
+      // 1. Module instantiation failures (the classic post-deploy skew:
+      //    "SyntaxError: Importing binding name 'x' is not found") fire the
+      //    window error event with a message. One guarded recovery reload
+      //    fixes the ordinary case -- a stale cached entry module mixing
+      //    with fresh siblings -- because a reload revalidates the
+      //    top-level document (browsers bypass its cache even though GH
+      //    Pages caps HTML at the same fixed max-age=600 as every other
+      //    file), and Pages deployments now ship the entry as one
+      //    self-contained bundle whose bindings cannot skew. The
+      //    sessionStorage guard mirrors the coi-serviceworker pattern: at
+      //    most one recovery reload per system per session, never a loop.
+      // 2. Module fetch failures (404/OMT/network) fire the same event with
+      //    no message; after the recovery attempt those surface as text.
+      // 3. A watchdog for everything that slips past (no error event, or a
+      //    worker that dies before its first output): if the terminal still
+      //    shows only the static LOADING... line after 20s, say so. The
+      //    launcher owns #status once it runs, and disarms the watchdog by
+      //    setting data-adventure-boot-done as soon as the game produces
+      //    its first output, so the hint never fires for a healthy (if
+      //    slow) startup.
+      (function () {
+        var status = document.getElementById("status");
+        if (!status) return;
+        var output = document.getElementById("output");
+        var recoveryKey = "adventure-module-reload";
+
+        function showBootStatus(message) {
+          if (status.textContent) return;
+          status.textContent = message;
+          status.hidden = false;
+        }
+
+        window.addEventListener(
+          "error",
+          function (event) {
+            if (document.documentElement.dataset.adventureBootDone) return;
+            var hadMessage = Boolean(
+              event.message &&
+                // Module scripts report instantiation errors on window;
+                // resource load errors carry the failed element instead.
+                !(event.target && event.target !== window),
+            );
+            if (!hadMessage) {
+              showBootStatus(
+                (event.message || "The game failed to load.") +
+                  " Reload the page to retry.",
+              );
+              return;
+            }
+            // A skew-induced instantiation error is usually recoverable by
+            // one reload; if it persists (this session already retried),
+            // leave a visible diagnosis instead of looping. sessionStorage
+            // can throw in some private modes; a failed read just means
+            // "do not reload", which is the safe direction.
+            var retriedThisSession = false;
+            try {
+              retriedThisSession = Boolean(
+                sessionStorage.getItem(recoveryKey),
+              );
+            } catch {
+              retriedThisSession = true;
+            }
+            if (
+              !retriedThisSession &&
+              /^https?:$/.test(window.location.protocol)
+            ) {
+              try {
+                sessionStorage.setItem(recoveryKey, "1");
+              } catch {
+                // Without storage the reload cannot be guarded; skip it.
+                return;
+              }
+              window.location.reload();
+              return;
+            }
+            showBootStatus(
+              "Failed to load: " +
+                event.message +
+                " (a reload did not help; try a hard reload / clearing the site data)",
+            );
+          },
+          true,
+        );
+
+        setTimeout(function () {
+          if (document.documentElement.dataset.adventureBootDone) return;
+          if (output && output.textContent !== "LOADING...") return;
+          showBootStatus(
+            "Still loading after 20 seconds. Reload the page, or a hard reload if it persists.",
+          );
+        }, 20_000);
+      })();
+    </script>
     <script type="module" crossorigin src="./launcher.js"></script>
   </body>
 </html>

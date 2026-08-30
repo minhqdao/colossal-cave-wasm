@@ -61,6 +61,16 @@ function appendOutput(text) {
   if (!hasReceivedFirstOutput) {
     terminalText = "";
     hasReceivedFirstOutput = true;
+    // The first game output means the whole module graph loaded and the
+    // worker is streaming: disarm index.html's boot guard (recovery reload
+    // + watchdog) so it can never misfire later in the session.
+    document.documentElement.dataset.adventureBootDone = "1";
+    try {
+      sessionStorage.removeItem("adventure-module-reload");
+    } catch {
+      // Private modes can throw on storage access; the guard is
+      // session-scoped anyway and loses relevance after boot.
+    }
   }
 
   // Visually separate user input from the game's answer with a blank line.
