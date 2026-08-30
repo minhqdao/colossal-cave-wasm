@@ -10,6 +10,7 @@ import {
 } from "./terminal-output.js";
 import { isTouchPointer, moveInputCaretToEnd } from "./terminal-input.js";
 import {
+  pageRevealTarget,
   scrollTerminalToBottom,
 } from "./terminal-scroll.js";
 import { hasTextSelection, updateTextContent } from "./terminal-selection.js";
@@ -27,6 +28,8 @@ const input = /** @type {HTMLElement} */ (document.getElementById("input"));
 const cursor = /** @type {HTMLElement} */ (document.getElementById("cursor"));
 const screen = /** @type {HTMLElement} */ (document.getElementById("screen"));
 const terminalContainer = /** @type {HTMLElement} */ (document.getElementById("terminal-container"));
+const terminalElement = /** @type {HTMLElement} */ (document.getElementById("terminal"));
+const actionsRow = document.querySelector(".terminal-actions");
 const status = /** @type {HTMLElement} */ (document.getElementById("status"));
 const restartButton = /** @type {HTMLButtonElement} */ (document.getElementById("restart-game"));
 const terminalInput = /** @type {HTMLInputElement} */ (
@@ -59,6 +62,9 @@ const inputResponseTimeoutMs = 2_500;
 /** @param {string} text */
 function appendOutput(text) {
   if (!hasReceivedFirstOutput) {
+    // First line of a block that starts where the LOADING placeholder
+    // sits: mark its top for the page reveal (see below).
+    markOutputBlockStart(true);
     terminalText = "";
     hasReceivedFirstOutput = true;
     // The first game output means the whole module graph loaded and the
@@ -144,6 +150,121 @@ function needsSoftKeyboardFocus() {
   return closedHeight - height <= 80;
 }
 
+// Game output auto-reveal, for the page-scroll layout: on touch-sized
+// screens the terminal keeps its natural height (#screen's internal
+// scrolling is off), so every output block extends the document below
+// the fold and would otherwise need a manual scroll per turn. When a
+// turn's output completes, the page scrolls just far enough to SHOW the
+// block: bottom-aligned when it fits on screen (whole block plus the
+// prompt visible at once), from its BEGINNING when it does not (the
+// screen's real estate is spent reading the room description top-down,
+// see pageRevealTarget). Desktop layouts already pin #screen's bottom
+// through scrollTerminalToBottom and stay untouched; keyboard focus
+// scrolling on typing keeps working because this reveals at turn end,
+// once, and never scrolls the view upward.
+//
+// The user may take ownership at any time: a single scroll gesture,
+// wheel turn, or an in-progress text selection during the pending turn
+// cancels the reveal entirely -- auto-scroll must never yank a reader
+// around (the established chat/terminal stickiness contract).
+
+/** Document y of the pending block's top edge; -1 when none. */
+let outputBlockTop = -1;
+let scrollTakeover = false;
+
+function inPageScrollMode() {
+  // While content is shorter than #screen both numbers are equal; the
+  // reveal then computes a no-op target anyway, so being generous here
+  // cannot cause a stray scroll.
+  return usesTouchInput() && screen.scrollHeight <= screen.clientHeight;
+}
+
+/**
+ * @param {boolean} atTop true for the very first block, which replaces
+ *   the LOADING placeholder in place (its top edge is the placeholder's
+ *   top); false when new content grows below the existing transcript.
+ */
+function markOutputBlockStart(atTop) {
+  if (!inPageScrollMode()) {
+    outputBlockTop = -1;
+    return;
+  }
+  const rect = terminalElement.getBoundingClientRect();
+  outputBlockTop = (atTop ? rect.top : rect.bottom) + window.scrollY;
+  scrollTakeover = false;
+}
+
+function revealOutputBlock() {
+  const blockTop = outputBlockTop;
+  outputBlockTop = -1;
+  if (blockTop < 0 || scrollTakeover) return;
+
+  // Measure on the next frame, not right now: the block was painted in
+  // this same task and the layout may still shift underneath it (for
+  // example, when a web font swaps in and re-wraps lines). Revealing
+  // against a mid-flip measurement leaves the prompt off-screen.
+  const schedule = () => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => applyReveal(blockTop));
+    });
+  };
+  if (document.fonts?.status === "loading") {
+    document.fonts.ready.then(schedule);
+  } else {
+    schedule();
+  }
+}
+
+/** @param {number} blockTop */
+function applyReveal(blockTop) {
+  if (scrollTakeover) return;
+  if (hasTextSelection(window.getSelection())) return;
+
+  const visibleHeight =
+    window.visualViewport?.height ?? window.innerHeight;
+  // Work in visual-viewport coordinates (the block rects are document
+  // ones): with the keyboard open, the visible window sits offsetTop
+  // pixels down from the layout viewport's top edge.
+  const viewportTop =
+    window.scrollY + (window.visualViewport?.offsetTop ?? 0);
+  const blockBottom =
+    terminalElement.getBoundingClientRect().bottom + window.scrollY;
+  // Space that must stay visible below the block: from the block's bottom
+  // edge to the bottom of the action row (prompt line, gaps, buttons),
+  // plus a small margin for breathing room. The footer distance is
+  // measured, not guessed, so it stays correct across text sizes, fonts,
+  // and keyboard layouts.
+  const actionsBottom =
+    (actionsRow?.getBoundingClientRect().bottom ?? 0) + window.scrollY;
+  const reserve = Math.max(0, actionsBottom - blockBottom) + 16;
+  const target = pageRevealTarget({
+    currentScrollY: viewportTop,
+    blockTop,
+    blockBottom,
+    visibleHeight,
+    reserve,
+    maxScroll: Math.max(
+      0,
+      document.documentElement.scrollHeight - visibleHeight,
+    ),
+  });
+  const layoutTarget = Math.max(
+    0,
+    target - (window.visualViewport?.offsetTop ?? 0),
+  );
+  if (layoutTarget > window.scrollY) window.scrollTo(0, layoutTarget);
+}
+
+for (const takeoverEvent of ["wheel", "touchmove"]) {
+  window.addEventListener(
+    takeoverEvent,
+    () => {
+      if (outputBlockTop >= 0) scrollTakeover = true;
+    },
+    { passive: true },
+  );
+}
+
 document.addEventListener(
   "visibilitychange",
   restoreTerminalAfterVisibilityChange,
@@ -224,6 +345,8 @@ function submitInput() {
   }
 
   const value = `${currentInput}\n`;
+  // Everything the game prints from here forms the next reveal block.
+  markOutputBlockStart(!hasReceivedFirstOutput);
   terminalText += value;
   pendingInputSeparator = true;
   currentInput = "";
@@ -533,6 +656,9 @@ function launchWorker(buffer, keys, currentRunId, attempt = 0) {
       terminalInput.value = "";
       waitingForInput = true;
       flushOutputRender();
+      // The turn's output is complete and laid out: reveal it before the
+      // input focus so keyboard panning cannot fight the reveal.
+      revealOutputBlock();
       focusTerminalInput(); // Focus the command field; a tap opens the keyboard on mobile
     } else if (data.type === "ERROR") {
       if (!hasStarted) {
@@ -547,6 +673,7 @@ function launchWorker(buffer, keys, currentRunId, attempt = 0) {
       appendOutput("\n*** SYSTEM OFFLINE ***\n");
       waitingForInput = false;
       flushOutputRender();
+      revealOutputBlock();
       releaseWorker();
     }
   };
@@ -592,6 +719,7 @@ window.addEventListener("pageshow", () => {
 
 /** @param {Error} error */
 function reportStartError(error) {
+  outputBlockTop = -1;
   releaseWorker();
   cancelOutputRender();
   setStatus(error.message);
@@ -604,6 +732,7 @@ function reportStartError(error) {
 function restartGame() {
   runId += 1;
   interruptedByPageHide = false;
+  outputBlockTop = -1;
   releaseWorker();
   cancelOutputRender();
   terminalText = "LOADING...\n";
