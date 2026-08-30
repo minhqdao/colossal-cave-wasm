@@ -69,13 +69,10 @@ jobs:
       - name: Typecheck @ts-check sources (strict)
         run: scripts/typecheck.sh
 
-      - name: Browser smoke tests (launcher gestures + boot guard + prompt jump)
+      - name: Browser smoke tests (launcher gestures + boot guard)
         run: |
           npm install --no-save --no-package-lock --prefix scripts jsdom@26
-          SMOKE_NODE_MODULES="$PWD/scripts/node_modules" node --test \
-            scripts/browser-smoke.test.mjs \
-            scripts/boot-guard.test.mjs \
-            scripts/prompt-jump.test.mjs
+          node --test scripts/browser-smoke.test.mjs scripts/boot-guard.test.mjs
 
   build-wasm:
     runs-on: ubuntu-latest

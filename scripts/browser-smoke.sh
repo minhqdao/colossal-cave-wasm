@@ -17,5 +17,4 @@ fi
 SMOKE_NODE_MODULES="$SMOKE_HOME/node_modules" exec node --test \
     scripts/browser-smoke.test.mjs \
     scripts/boot-guard.test.mjs \
-    scripts/prompt-jump.test.mjs \
     "$@"

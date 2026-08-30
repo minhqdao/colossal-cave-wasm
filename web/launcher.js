@@ -10,8 +10,6 @@ import {
 } from "./terminal-output.js";
 import { isTouchPointer, moveInputCaretToEnd } from "./terminal-input.js";
 import {
-  keyboardHeight,
-  promptJumpTarget,
   scrollTerminalToBottom,
 } from "./terminal-scroll.js";
 import { hasTextSelection, updateTextContent } from "./terminal-selection.js";
@@ -144,96 +142,6 @@ function needsSoftKeyboardFocus() {
     height,
   );
   return closedHeight - height <= 80;
-}
-
-/**
- * Height of a visible soft keyboard (0 while closed; 0 on Android Chrome,
- * whose keyboard resizes the layout viewport instead of covering it).
- */
-function measureKeyboardHeight() {
-  const viewport = window.visualViewport;
-  return keyboardHeight({
-    innerHeight: window.innerHeight,
-    visualHeight: viewport?.height ?? window.innerHeight,
-    visualTopOffsetTop: viewport?.offsetTop ?? 0,
-  });
-}
-
-/**
- * Keep the bottom of the document scrollable up to the keyboard's top
- * edge. A page-scroll document ends at the window bottom, so without this
- * reserve the jump could never lift the prompt out from under an open
- * keyboard on iOS -- "bottom" simply stops short. The padding disappears
- * again the moment the keyboard closes.
- */
-function applyKeyboardSpace() {
-  const height = measureKeyboardHeight();
-  document.documentElement.style.paddingBottom =
-    height > 0 ? `${height}px` : "";
-  return height;
-}
-
-/** Space kept between the cursor and the fold / keyboard top edge. */
-const REVEAL_PADDING = 16;
-
-/**
- * When the game finishes a turn, jump the page down if -- and only if --
- * the cursor is not fully visible: below the fold, or above it but hidden
- * under the soft keyboard. The jump brings the cursor to 16px above the
- * fold (the keyboard's top edge while one is open), mirroring the
- * browser's own keyboard reveal once the user starts typing. Nothing
- * scrolls while the cursor is already fully on screen.
- *
- * Measured two frames late: the block was painted in the same task and
- * the layout can still shift underneath (web-font swap re-wraps lines),
- * which would make a synchronous measurement stale.
- */
-function revealPromptIfHidden() {
-  const jump = () => {
-    applyKeyboardSpace();
-    const viewport = window.visualViewport;
-    const visualHeight = viewport?.height ?? window.innerHeight;
-    const visualTopOffsetTop = viewport?.offsetTop ?? 0;
-    const target = promptJumpTarget({
-      currentScrollY: window.scrollY,
-      visualTopOffsetTop,
-      visualHeight,
-      revealBottom: input.getBoundingClientRect().bottom + window.scrollY,
-      revealPadding: REVEAL_PADDING,
-      maxScroll: Math.max(
-        0,
-        document.documentElement.scrollHeight - window.innerHeight,
-      ),
-    });
-    if (target !== null && target > window.scrollY) {
-      window.scrollTo(0, target);
-    }
-  };
-  const settle = () => {
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(jump);
-    });
-  };
-  if (document.fonts?.status === "loading") {
-    document.fonts.ready.then(settle);
-  } else {
-    settle();
-  }
-}
-
-let lastKeyboardHeight = measureKeyboardHeight();
-if (window.visualViewport) {
-  // iOS opens the soft keyboard asynchronously after the game asks for
-  // input, so the turn-end measurement can happen while the keyboard is
-  // still closed and the prompt looks fine. When it then rises over the
-  // prompt, redo the reveal against the new fold.
-  window.visualViewport.addEventListener("resize", () => {
-    const height = measureKeyboardHeight();
-    const previous = lastKeyboardHeight;
-    lastKeyboardHeight = height;
-    applyKeyboardSpace();
-    if (height > previous && waitingForInput) revealPromptIfHidden();
-  });
 }
 
 document.addEventListener(
@@ -626,7 +534,6 @@ function launchWorker(buffer, keys, currentRunId, attempt = 0) {
       waitingForInput = true;
       flushOutputRender();
       focusTerminalInput(); // Focus the command field; a tap opens the keyboard on mobile
-      revealPromptIfHidden();
     } else if (data.type === "ERROR") {
       if (!hasStarted) {
         handleStartupFailure(data.message);
