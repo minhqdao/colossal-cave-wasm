@@ -10,6 +10,7 @@ import {
 } from "./terminal-output.js";
 import { isTouchPointer, moveInputCaretToEnd } from "./terminal-input.js";
 import {
+  promptJumpTarget,
   scrollTerminalToBottom,
 } from "./terminal-scroll.js";
 import { hasTextSelection, updateTextContent } from "./terminal-selection.js";
@@ -142,6 +143,49 @@ function needsSoftKeyboardFocus() {
     height,
   );
   return closedHeight - height <= 80;
+}
+
+/**
+ * When the game finishes a turn, jump the page to the bottom if -- and
+ * only if -- the prompt line is not fully visible: below the fold, or
+ * above it but hidden under the soft keyboard. This mirrors the browser's
+ * own keyboard reveal once the user starts typing, so waiting for input
+ * never leaves the user staring at content they cannot act on, and never
+ * scrolls when the whole prompt is already on screen.
+ *
+ * Measured two frames late: the block was painted in the same task and
+ * the layout can still shift underneath (web-font swap re-wraps lines),
+ * which would make a synchronous measurement stale.
+ */
+function revealPromptIfHidden() {
+  const jump = () => {
+    const viewport = window.visualViewport;
+    const visualHeight = viewport?.height ?? window.innerHeight;
+    const visualTopOffsetTop = viewport?.offsetTop ?? 0;
+    const target = promptJumpTarget({
+      currentScrollY: window.scrollY,
+      visualTopOffsetTop,
+      visualHeight,
+      promptBottom: input.getBoundingClientRect().bottom + window.scrollY,
+      maxScroll: Math.max(
+        0,
+        document.documentElement.scrollHeight - window.innerHeight,
+      ),
+    });
+    if (target !== null && target > window.scrollY) {
+      window.scrollTo(0, target);
+    }
+  };
+  const settle = () => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(jump);
+    });
+  };
+  if (document.fonts?.status === "loading") {
+    document.fonts.ready.then(settle);
+  } else {
+    settle();
+  }
 }
 
 document.addEventListener(
@@ -534,6 +578,7 @@ function launchWorker(buffer, keys, currentRunId, attempt = 0) {
       waitingForInput = true;
       flushOutputRender();
       focusTerminalInput(); // Focus the command field; a tap opens the keyboard on mobile
+      revealPromptIfHidden();
     } else if (data.type === "ERROR") {
       if (!hasStarted) {
         handleStartupFailure(data.message);
