@@ -163,6 +163,23 @@ if (JSDOM) {
     assert.equal(page.status().hidden, false);
   });
 
+  test("watchdog fires while the launcher shows its own LOADING line", async () => {
+    const page = await openBootPage();
+    // The launcher painted its initial "LOADING...\n" (trailing newline,
+    // unlike the static HTML) but the worker never delivered game output:
+    // the common stall. The guard must compare trimmed text, or this state
+    // would slip past silently.
+    page.output().textContent = "LOADING...\n";
+    const watchdog = page.timers.find((t) => t.ms === 20_000);
+    assert.ok(watchdog, "watchdog is registered");
+    watchdog.fn();
+    assert.match(
+      page.status().textContent,
+      /Still loading after 20 seconds/,
+      "stall before the first game output surfaces via the watchdog",
+    );
+  });
+
   test("first game output disarms the guard", async () => {
     const page = await openBootPage();
     // Simulate the launcher handshake: boot done + first output replaced.

@@ -482,7 +482,9 @@
 
         setTimeout(function () {
           if (document.documentElement.dataset.adventureBootDone) return;
-          if (output && output.textContent !== "LOADING...") return;
+          // Trim so the launcher's own "LOADING...\n" (no game output yet)
+          // is still caught: a stall at this stage is the common case.
+          if (output && output.textContent.trim() !== "LOADING...") return;
           showBootStatus(
             "Still loading after 20 seconds. Reload the page, or a hard reload if it persists.",
           );
