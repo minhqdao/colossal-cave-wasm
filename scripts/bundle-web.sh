@@ -36,12 +36,18 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Deterministic per-commit id: any content change to the pages sources flips
-# it, so a fresh deploy's HTML references URLs no browser has cached yet and
-# fetches the new bundle instead of serving the old one from max-age.
+# Deterministic per-commit id: any content change to the *bundled* sources
+# flips it, so a fresh deploy's HTML references URLs no browser has cached
+# yet and fetches the new bundle instead of serving the old one from
+# max-age. The file list must cover the full esbuild import graph (launcher
+# + worker): the modules that get inlined but are not named here would let a
+# change slip through with a stale cached bundle -- the exact skew the
+# versioned entry exists to prevent.
 BUILD_ID="$( (git rev-parse HEAD 2> /dev/null || true; \
     cat web/index.html web/coi-serviceworker.js web/launcher.js \
-        web/runner.worker.js web/runner-protocol.js web/adventure.js 2> /dev/null) \
+        web/runner.worker.js web/runner-protocol.js web/adventure.js \
+        web/terminal-input.js web/terminal-output.js web/terminal-render.js \
+        web/terminal-scroll.js web/terminal-selection.js 2> /dev/null) \
     | shasum -a 256 | cut -d' ' -f1 | cut -c1-12 )"
 
 mkdir -p "$OUT_DIR"
