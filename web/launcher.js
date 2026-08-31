@@ -181,6 +181,7 @@ const KEYBOARD_SETTLE_MS = 120;
 let currentKeyboardInset = 0;
 let heldKeyboardInset = 0;
 let keyboardSettleTimer = 0;
+let keyboardOpen = false;
 function updateKeyboardInset({ scrollAfterResize = false } = {}) {
   if (!usesTouchInput() || !main) return;
   const viewport = window.visualViewport;
@@ -195,15 +196,19 @@ function updateKeyboardInset({ scrollAfterResize = false } = {}) {
   if (inset !== currentKeyboardInset) {
     currentKeyboardInset = inset;
     main.style.setProperty("--keyboard-inset", `${inset}px`);
-    // Lock the document while the keyboard is up (CSS in index.html).
-    // Chrome shrinks the layout viewport with the keyboard, so the range
-    // that is a token 1px when closed balloons to the keyboard's height
-    // -- and a background drag spends it, uncovering body background
-    // below the buttons. The lock covers exactly the keyboard-open
-    // window (pull-to-refresh is meaningless then anyway) and releases
-    // on close, driven by this same measurement so there is one source
-    // of truth.
-    document.documentElement.classList.toggle("keyboard-open", inset > 0);
+  }
+  // Lock the document only while the keyboard occludes the layout: the
+  // visual viewport is then a short window into the taller layout
+  // viewport, and any scroll range lets the user pan it, sliding the
+  // pinned main up and uncovering body below the buttons. Pull-to-refresh
+  // needs the range only when the keyboard is closed, so spend it here.
+  // inset > 0 is keyboard-only in practice: main is sized off 100svh, so
+  // toolbar retraction alone never produces a positive inset.
+  const open = inset > 0;
+  if (open !== keyboardOpen) {
+    keyboardOpen = open;
+    document.documentElement.classList.toggle("keyboard-open", open);
+    if (open) window.scrollTo(0, 0); // re-pin any stray scroll before locking
   }
   // Freeze the height once the keyboard has stopped opening, and thaw it
   // as soon as it starts closing or grows again. Everything that happens
