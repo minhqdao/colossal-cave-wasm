@@ -69,6 +69,7 @@ const SNAPSHOT = `(() => {
     screen: { ...r(screen), clientHeight: Math.round(screen.clientHeight*100)/100, scrollHeight: Math.round(screen.scrollHeight*100)/100, scrollTop: Math.round(screen.scrollTop*100)/100, scrolls: screen.scrollHeight > screen.clientHeight + 1 },
     promptBottom: Math.round(input.getBoundingClientRect().bottom*100)/100,
     promptInView: input.getBoundingClientRect().bottom <= visibleBottom + 1,
+    actionsGap: Math.round((visibleBottom - document.querySelector('.terminal-actions').getBoundingClientRect().bottom)*100)/100,
     waiting: window.adventureDebug ? window.adventureDebug.state.waitingForInput : null,
   };
 })()`;
@@ -265,12 +266,23 @@ test(
         true,
         `prompt should remain visible with the keyboard open (promptBottom=${withKeyboard.promptBottom}, visibleBottom=${withKeyboard.vv.offsetTop + withKeyboard.vv.height})`,
       );
+      // The buttons sit 8 px clear of the keyboard, and lose that padding
+      // again once it closes.
+      assert.ok(
+        withKeyboard.actionsGap >= 7 && withKeyboard.actionsGap <= 9,
+        `buttons should clear the keyboard by 8 px, got ${withKeyboard.actionsGap}`,
+      );
       // Close the keyboard: the inset must relax back to 0.
       await e2e.evaluate("window.visualViewport.__setHeight(844)");
       await new Promise((r) => setTimeout(r, 250));
       const after = await e2e.evaluate(SNAPSHOT);
       assert.equal(after.keyboardInset, 0, "inset should return to 0 when the keyboard closes");
       assert.equal(after.promptInView, true);
+      assert.equal(
+        after.actionsGap,
+        before.actionsGap,
+        `keyboard closing should restore the buttons' gap (before=${before.actionsGap}, after=${after.actionsGap})`,
+      );
 
       // Regression: with the keyboard open, a background drag must neither
       // scroll the page nor resize the terminal -- a panned main reads to

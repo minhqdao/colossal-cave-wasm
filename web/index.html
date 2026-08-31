@@ -315,6 +315,8 @@
           display: flex;
           flex-direction: column;
           height: calc(100% - var(--keyboard-inset, 0px));
+          /* Breathing room over the keyboard, none while it is closed. */
+          padding-bottom: min(8px, var(--keyboard-inset, 0px));
         }
         #subtitle {
           font-size: 11px;
@@ -348,6 +350,7 @@
           display: flex;
           flex-direction: column;
           height: calc(100% - var(--keyboard-inset, 0px));
+          padding-bottom: min(8px, var(--keyboard-inset, 0px));
         }
         #terminal-container {
           flex: 1 1 0;
