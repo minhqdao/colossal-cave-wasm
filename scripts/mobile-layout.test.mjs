@@ -32,6 +32,11 @@ import { findChrome, startChromeE2E, waitUntil } from "./chrome-e2e.mjs";
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const port = Number(process.argv[2]) || 8903;
 
+// Mirrors the main padding-bottom (min(Npx, keyboard-inset)) of the
+// portrait block in web/index.html -- the device emulated below is
+// portrait, so that is the rule under test. Keep in step with the CSS.
+const BREATHING_ROOM_PX = 16;
+
 const CHROME = findChrome();
 const skipReason = CHROME
   ? existsSync(join(repoRoot, "web", "index.html"))
@@ -295,11 +300,12 @@ test(
         true,
         `prompt should remain visible with the keyboard open (promptBottom=${withKeyboard.promptBottom}, visibleBottom=${withKeyboard.vv.offsetTop + withKeyboard.vv.height})`,
       );
-      // The buttons sit 8 px clear of the keyboard, and lose that padding
-      // again once it closes.
+      // The buttons sit the padding-bottom clear of the keyboard, and
+      // lose that padding again once it closes.
       assert.ok(
-        withKeyboard.actionsGap >= 7 && withKeyboard.actionsGap <= 9,
-        `buttons should clear the keyboard by 8 px, got ${withKeyboard.actionsGap}`,
+        withKeyboard.actionsGap >= BREATHING_ROOM_PX - 1 &&
+          withKeyboard.actionsGap <= BREATHING_ROOM_PX + 1,
+        `buttons should clear the keyboard by ${BREATHING_ROOM_PX} px, got ${withKeyboard.actionsGap}`,
       );
       // Close the keyboard: the inset must relax back to 0.
       await e2e.evaluate("window.visualViewport.__setHeight(844)");
