@@ -283,23 +283,23 @@
           opacity: 0;
         }
       }
-      /* Fit the page exactly: svh never moves when chrome retracts, so
-         the shell is as tall as the smallest viewport and the document
-         has no scroll range -- a background drag scrolls nothing and
-         cannot feed the keyboard-inset measurement (launcher.js) phantom
-         motion. Deliberately NOT overflow:hidden / overscroll-behavior:
-         none: both are opt-OUTs for the browser's pull-to-refresh, which
-         starts from top overscroll and needs the root unclipped. Keep
-         this query (the union) in step with the two mobile layouts
-         below. */
+      /* Lock the page: unlocked, mobile chrome keeps the document a
+         toolbar taller than the viewport, and a background drag scrolling
+         it reads to the keyboard-inset measurement (launcher.js) as
+         keyboard motion, resizing the terminal under the finger. svh
+         because it never moves when chrome retracts; root overflow is
+         what propagates the lock to the viewport. Keep this query (the
+         union) in step with the two mobile layouts below. */
       @media (max-width: 560px), (max-height: 500px) and (pointer: coarse) {
         html,
         body {
           height: 100svh;
+          overflow: hidden;
+          overscroll-behavior: none;
         }
         body {
           /* The base min-height:100dvh would outstay svh while the
-             toolbar is expanded, re-adding a toolbar of scroll. */
+             toolbar is expanded, pushing past the lock without this. */
           min-height: 0;
         }
       }
@@ -309,8 +309,8 @@
         }
         main {
           /* Fixed window onto the transcript, scrolling internally: one
-             body content-box (viewport-sized by the svh fit above) less
-             the keyboard inset, which launcher.js measures from
+             body content-box (the lock above makes it viewport-sized)
+             less the keyboard inset, which launcher.js measures from
              visualViewport so the prompt rides above the soft keyboard. */
           display: flex;
           flex-direction: column;
