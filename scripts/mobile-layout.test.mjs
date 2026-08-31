@@ -61,6 +61,7 @@ const SNAPSHOT = `(() => {
       innerHeight: window.innerHeight,
       pageScrolls: document.documentElement.scrollHeight > window.innerHeight + 1,
       overflow: getComputedStyle(document.documentElement).overflow,
+      overscrollY: getComputedStyle(document.documentElement).overscrollBehaviorY,
     },
     vv: vv ? { height: Math.round(vv.height*100)/100, offsetTop: Math.round(vv.offsetTop*100)/100, scale: vv.scale } : null,
     dvh100, mainComputed, keyboardInset: Math.round(keyboardInset*100)/100,
@@ -198,12 +199,19 @@ test(
           false,
           `page should not scroll after "${s.cmd}" (doc.scrollHeight=${s.doc.scrollHeight}, innerHeight=${s.doc.innerHeight})`,
         );
-        // The mechanism, not just the symptom: the mobile layout locks the
-        // document, so the viewport has no scroll to offer.
+        // Pull-to-refresh contract: it starts from a top overscroll of the
+        // document, so the root must neither be clipped nor opt out of
+        // overscroll. (The page not scrolling is invariant 1's job; here
+        // it is a structural fit, not a clip.)
         assert.equal(
           s.doc.overflow,
-          "hidden",
-          `document should lock scrolling on the mobile layout (overflow=${s.doc.overflow})`,
+          "visible",
+          `clipping the root kills iOS rubber-band and its pull-to-refresh (overflow=${s.doc.overflow})`,
+        );
+        assert.equal(
+          s.doc.overscrollY,
+          "auto",
+          `overscroll-behavior: none is the explicit pull-to-refresh opt-out (overscrollY=${s.doc.overscrollY})`,
         );
       }
 
@@ -287,23 +295,17 @@ test(
       // Regression: with the keyboard open, a background drag must neither
       // scroll the page nor resize the terminal -- a panned main reads to
       // the inset measurement as "the keyboard moved" (the phantom-resize
-      // bug the document lock in index.html kills at the root).
+      // bug). The svh fit in index.html kills it at the source: the
+      // document is exactly as tall as the viewport, so the drag has no
+      // scroll to offer and the gesture lands on the browser UI (which is
+      // also what pull-to-refresh needs).
       await e2e.evaluate("window.visualViewport.__setHeight(544)");
       await new Promise((r) => setTimeout(r, 250));
-      // Force the document to overflow, the way mobile chrome does.
-      await e2e.evaluate(`(() => {
-        const d = document.createElement('div');
-        d.id = 'drag-spacer';
-        d.style.height = '1200px';
-        document.body.appendChild(d);
-      })()`);
-      await new Promise((r) => setTimeout(r, 200));
       const beforeDrag = await e2e.evaluate(SNAPSHOT);
-      // The lock contains the overflow: not one scrollable pixel added.
       assert.equal(
         beforeDrag.doc.pageScrolls,
         false,
-        `spacer must not make the page scrollable (scrollHeight=${beforeDrag.doc.scrollHeight}, innerHeight=${beforeDrag.doc.innerHeight})`,
+        `fit keyboard-open layout should leave no scroll range (scrollHeight=${beforeDrag.doc.scrollHeight}, innerHeight=${beforeDrag.doc.innerHeight})`,
       );
       // Body padding above the title: outside the terminal, on the page.
       await e2e.send("Input.synthesizeScrollGesture", {
@@ -331,7 +333,6 @@ test(
         beforeDrag.keyboardInset,
         `background drag should not change the keyboard inset (before=${beforeDrag.keyboardInset}, after=${afterDrag.keyboardInset})`,
       );
-      await e2e.evaluate("document.getElementById('drag-spacer')?.remove()");
     } finally {
       e2e.close();
     }
