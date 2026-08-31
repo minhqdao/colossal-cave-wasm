@@ -72,7 +72,7 @@ jobs:
       - name: Browser smoke tests (launcher gestures + boot guard)
         run: |
           npm install --no-save --no-package-lock --prefix scripts jsdom@26
-          node --test scripts/browser-smoke.test.mjs scripts/boot-guard.test.mjs
+          node --test scripts/browser-smoke.test.mjs scripts/boot-guard.test.mjs scripts/terminal-scroll.test.mjs
 
   build-wasm:
     runs-on: ubuntu-latest

@@ -65,7 +65,7 @@
         font-family: "Courier New", Courier, monospace;
         font-size: 16px;
         margin: 0;
-        min-height: 100vh;
+        min-height: 100dvh;
         padding: 32px 16px;
       }
       main {
@@ -135,6 +135,7 @@
         height: 100%;
         line-height: 1.2;
         overflow-y: auto;
+        overscroll-behavior: contain;
         padding: 28px;
         scrollbar-width: none;
         text-shadow: 0 0 2px rgba(200, 248, 200, 0.35);
@@ -287,18 +288,24 @@
           padding: 16px 10px;
         }
         main {
+          /* Bounded so the page never grows with the game output: the
+             terminal stays a fixed window onto the transcript and scrolls
+             internally, like a real terminal. var(--keyboard-inset) is
+             driven by visualViewport (see launcher.js) so the soft keyboard
+             still leaves the prompt in view. */
           display: flex;
           flex-direction: column;
-          min-height: calc(100vh - 32px);
-          min-height: calc(100dvh - 32px);
+          height: calc(100dvh - 32px - var(--keyboard-inset, 0px));
         }
         #subtitle {
           font-size: 11px;
         }
         #terminal-container {
-          flex: 1 1 auto;
-          height: auto;
-          min-height: 240px;
+          /* Fills the bounded main column; the 160 px floor keeps the
+             terminal usable in the unlikely case the keyboard inset plus
+             chrome would otherwise push it to (near) zero. */
+          flex: 1 1 0;
+          min-height: 160px;
         }
         #screen {
           font-size: 14px;
@@ -317,15 +324,15 @@
           padding: 10px;
         }
         main {
+          /* Short-landscape: see the portrait block above for the bounded-
+             terminal rationale; only the chrome height differs here. */
           display: flex;
           flex-direction: column;
-          min-height: calc(100vh - 20px);
-          min-height: calc(100dvh - 20px);
+          height: calc(100dvh - 20px - var(--keyboard-inset, 0px));
         }
         #terminal-container {
-          flex: 1 1 auto;
-          height: auto;
-          min-height: 180px;
+          flex: 1 1 0;
+          min-height: 120px;
         }
         #terminal-input {
           display: block;

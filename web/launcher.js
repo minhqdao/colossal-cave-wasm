@@ -10,6 +10,8 @@ import {
 } from "./terminal-output.js";
 import { isTouchPointer, moveInputCaretToEnd } from "./terminal-input.js";
 import {
+  isPinnedToBottom,
+  measureKeyboardInset,
   scrollTerminalToBottom,
 } from "./terminal-scroll.js";
 import { hasTextSelection, updateTextContent } from "./terminal-selection.js";
@@ -32,6 +34,7 @@ const restartButton = /** @type {HTMLButtonElement} */ (document.getElementById(
 const terminalInput = /** @type {HTMLInputElement} */ (
   document.getElementById("terminal-input")
 );
+const main = /** @type {HTMLElement | null} */ (document.querySelector("main"));
 
 const wasmUrl = new URL("./adventure.js", import.meta.url).href;
 
@@ -162,6 +165,55 @@ window.addEventListener("resize", () => {
   if (!waitingForInput || document.activeElement !== terminalInput) return;
   scrollTerminalToBottom(screen);
 });
+
+// Touch-only: keep the prompt in view when the soft keyboard opens or
+// closes (and when the page pans during the keyboard animation) by
+// shrinking main so the terminal's bottom -- where the latest output and
+// the input line live -- rides just above the visible area. Desktop is
+// excluded: the var is unused outside the mobile media query and a
+// desktop window resize is already handled above.
+let currentKeyboardInset = 0;
+function updateKeyboardInset({ scrollAfterResize = false } = {}) {
+  if (!usesTouchInput() || !main) return;
+  const viewport = window.visualViewport;
+  if (!viewport) return;
+  // Check "was at the bottom" using the CURRENT (pre-resize) layout.
+  // After the inset shrinks the container, the maximum scrollTop grows
+  // by exactly the inset, so a user who was pinned in the old layout
+  // would read as "not pinned" against the new max -- which would
+  // suppress the re-scroll and strand the prompt in the scrolled-out
+  // region behind the freshly opened keyboard. "Sticky" only fires when
+  // the reader was already following the bottom before the system
+  // changed the viewport; someone who had scrolled up stays where they
+  // were.
+  const wasPinned = scrollAfterResize && isPinnedToBottom(screen);
+  const inset = measureKeyboardInset(main, viewport, currentKeyboardInset);
+  if (inset !== currentKeyboardInset) {
+    currentKeyboardInset = inset;
+    main.style.setProperty("--keyboard-inset", `${inset}px`);
+  }
+  if (wasPinned) {
+    outputRenderer.schedule();
+  }
+}
+if (window.visualViewport) {
+  // Keyboard show/hide and orientation change both fire resize here;
+  // re-scrolling pins the prompt above the keyboard.
+  window.visualViewport.addEventListener("resize", () =>
+    updateKeyboardInset({ scrollAfterResize: true }),
+  );
+  // Panning (visualViewport scroll) does not change what is hidden --
+  // just where the visible region sits -- so only re-measure.
+  window.visualViewport.addEventListener("scroll", () =>
+    updateKeyboardInset(),
+  );
+}
+// Fallback for browsers / WebViews that miss visualViewport events.
+window.addEventListener("resize", () => {
+  if (!usesTouchInput() || !main) return;
+  updateKeyboardInset({ scrollAfterResize: true });
+});
+updateKeyboardInset();
 
 terminalInput.addEventListener("focus", () => {
   render();
