@@ -112,13 +112,12 @@ function cancelOutputRender() {
   outputRenderer.cancel();
 }
 
-// The soft keyboard is only detected, never laid out against: the terminal
-// keeps its normal size and the page scrolls natively. Detecting remains
-// necessary because iOS raises the keyboard only for focus() calls made
-// inside a gesture handler, so the auto-focus issued when the game asks for
-// input leaves the field focused with the keyboard still closed. A tap must
-// then re-trigger focus, which requires knowing whether the keyboard is
-// already open.
+// Soft-keyboard detection (the layout response is the --keyboard-inset
+// wiring below) is necessary because iOS raises the keyboard only for
+// focus() calls made inside a gesture handler, so the auto-focus issued
+// when the game asks for input leaves the field focused with the keyboard
+// still closed. A tap must then re-trigger focus, which requires knowing
+// whether the keyboard is already open.
 /**
  * The visual viewport when available, otherwise window. Only `height` is
  * read, with a ?? fallback to innerHeight on window.
@@ -152,14 +151,12 @@ document.addEventListener(
   restoreTerminalAfterVisibilityChange,
 );
 
-// Desktop-only safety net. The keyboard-constraining code was removed in
-// favor of native page scrolling on touch, but on a desktop a window resize
-// (OS resize, fullscreen toggle, devtools dock) re-measures the scrollable
-// terminal without firing anything that keeps the just-shown prompt in view,
-// so it can end up scrolled off. Touch is deliberately excluded: the visual
-// viewport drives its own scrolling there and yanking the terminal to the
-// bottom during the soft-keyboard animation is exactly the behavior the
-// rework removed.
+// Desktop-only safety net: a window resize (OS resize, fullscreen toggle,
+// devtools dock) re-measures the scrollable terminal without firing
+// anything that keeps the just-shown prompt in view, so it can end up
+// scrolled off. Touch is excluded here -- the keyboard-inset update below
+// owns the touch re-scroll -- because yanking the terminal to the bottom
+// mid soft-keyboard-animation is exactly what the inset tracks instead.
 window.addEventListener("resize", () => {
   if (usesTouchInput()) return;
   if (!waitingForInput || document.activeElement !== terminalInput) return;
@@ -177,15 +174,10 @@ function updateKeyboardInset({ scrollAfterResize = false } = {}) {
   if (!usesTouchInput() || !main) return;
   const viewport = window.visualViewport;
   if (!viewport) return;
-  // Check "was at the bottom" using the CURRENT (pre-resize) layout.
-  // After the inset shrinks the container, the maximum scrollTop grows
-  // by exactly the inset, so a user who was pinned in the old layout
-  // would read as "not pinned" against the new max -- which would
-  // suppress the re-scroll and strand the prompt in the scrolled-out
-  // region behind the freshly opened keyboard. "Sticky" only fires when
-  // the reader was already following the bottom before the system
-  // changed the viewport; someone who had scrolled up stays where they
-  // were.
+  // Sample "at the bottom" before applying the inset: shrinking the
+  // container raises the maximum scrollTop by the inset, so a reader who
+  // was pinned in the old layout would no longer read as pinned after.
+  // Someone who had scrolled up to inspect history is left where they are.
   const wasPinned = scrollAfterResize && isPinnedToBottom(screen);
   const inset = measureKeyboardInset(main, viewport, currentKeyboardInset);
   if (inset !== currentKeyboardInset) {

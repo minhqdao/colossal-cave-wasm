@@ -1,7 +1,7 @@
-// End-to-end mobile-layout test for the bounded-terminal fix. Mirrors the
-// shape of e2e-bundle.test.mjs: serves web/ from the dev server, drives
-// headless Chrome over CDP with a phone-sized viewport and touch, and
-// asserts the four invariants the bug violated:
+// End-to-end mobile-layout test for the bounded-terminal fix. Uses the
+// shared Chrome harness (scripts/chrome-e2e.mjs) to serve web/ and drive
+// headless Chrome over CDP with a phone-sized viewport and touch, asserting
+// the four invariants the bug violated:
 //
 //   1. The page never grows with the game output (no page scroll).
 //   2. The terminal container's height is bounded (a constant across
@@ -10,73 +10,29 @@
 //   4. The prompt (the input line) is always within the visible viewport.
 //
 // It then stubs visualViewport before the page scripts run to simulate the
-// soft keyboard (Chrome headless has no native keyboard emulation) and
+// soft keyboard (headless Chrome has no native keyboard emulation) and
 // asserts the keyboard inset keeps the prompt in view.
 //
-// Chrome is located the same way as e2e-bundle.test.mjs. The test skips
-// with an explicit reason when Chrome is missing.
-//
 // Usage:
-//   /Users/minh/.workbuddy-ai/binaries/node/versions/22.22.2/bin/node --test scripts/mobile-layout.test.mjs
+//   node --test scripts/mobile-layout.test.mjs [port]  (default 8903, web/ served)
 
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { accessSync, constants, existsSync, rmSync } from "node:fs";
-import { delimiter, join } from "node:path";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { findChrome, startChromeE2E, waitUntil } from "./chrome-e2e.mjs";
+
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const port = Number(process.argv[2]) || 8903;
-
-function isExecutable(path) {
-  try {
-    accessSync(path, constants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function findChrome() {
-  if (process.env.CHROME) {
-    return isExecutable(process.env.CHROME) ? process.env.CHROME : null;
-  }
-  const appPaths = [
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium",
-  ];
-  for (const path of appPaths) {
-    if (isExecutable(path)) return path;
-  }
-  const names = ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"];
-  for (const dir of (process.env.PATH ?? "").split(delimiter)) {
-    if (!dir) continue;
-    for (const name of names) {
-      const path = join(dir, name);
-      if (isExecutable(path)) return path;
-    }
-  }
-  return null;
-}
 
 const CHROME = findChrome();
 const skipReason = CHROME
   ? existsSync(join(repoRoot, "web", "index.html"))
     ? false
-    : "web/ not built (the dev server serves it directly; this is a repo issue)"
+    : "web/ is missing from the checkout"
   : "no Chrome found (set $CHROME to enable)";
-
-async function waitUntil(predicate, attempts, delayMs) {
-  for (let i = 0; i < attempts; i++) {
-    // Sleep before each attempt so the first evaluate happens after the
-    // page has had a chance to load (mirrors e2e-bundle.test.mjs).
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-    if (await predicate()) return true;
-  }
-  return false;
-}
 
 // One snapshot returns every invariant we care about plus the current
 // visualViewport so a test can decide whether the keyboard is "open" or
@@ -144,120 +100,45 @@ test(
   "mobile terminal: bounded box with internal scroll and visible prompt",
   { skip: skipReason, timeout: 120_000 },
   async () => {
-    const debugPort = 9700 + (process.pid % 200);
-    const profileDir = join(
-      process.env.TMPDIR || "/tmp",
-      `colossal-cave-mobile-profile-${process.pid}`,
-    );
-    const server = spawn(
-      process.execPath,
-      ["scripts/dev-server.mjs", String(port), "web"],
-      { cwd: repoRoot, stdio: ["ignore", "ignore", "pipe"] },
-    );
-    let serverError = "";
-    server.stderr.on("data", (chunk) => {
-      serverError += String(chunk);
+    const e2e = await startChromeE2E({
+      chrome: CHROME,
+      port,
+      serve: "web",
+      debugPort: 9700 + (process.pid % 200),
+      profilePrefix: "colossal-cave-mobile-profile",
     });
-    const browser = spawn(
-      CHROME,
-      [
-        "--headless=new",
-        "--disable-gpu",
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
-        `--remote-debugging-port=${debugPort}`,
-        `--user-data-dir=${profileDir}`,
-        "about:blank",
-      ],
-      { stdio: ["ignore", "ignore", "ignore"] },
-    );
-
     try {
-      assert.ok(
-        await waitUntil(async () => {
-          try {
-            return (await fetch(`http://localhost:${port}/`)).ok;
-          } catch {
-            return server.exitCode === null;
-          }
-        }, 50, 100),
-        `dev server came up on port ${port}${serverError ? `: ${serverError}` : ""}`,
-      );
-
-      let wsUrl = null;
-      const endpointUp = await waitUntil(async () => {
-        try {
-          const targets = await (
-            await fetch(`http://localhost:${debugPort}/json/list`)
-          ).json();
-          const page = targets.find((t) => t.type === "page");
-          if (page) {
-            wsUrl = page.webSocketDebuggerUrl;
-            return true;
-          }
-        } catch {}
-        return false;
-      }, 150, 100);
-      assert.ok(endpointUp, "Chrome DevTools endpoint came up");
-
-      const cdp = await new Promise((resolve, reject) => {
-        const ws = new WebSocket(wsUrl);
-        let nextId = 0;
-        const pending = new Map();
-        const send = (method, params = {}) =>
-          new Promise((res) => {
-            const id = ++nextId;
-            pending.set(id, res);
-            ws.send(JSON.stringify({ id, method, params }));
-          });
-        const evaluate = (expression) =>
-          send("Runtime.evaluate", {
-            expression,
-            returnByValue: true,
-            awaitPromise: true,
-          }).then((r) => {
-            if (r.exceptionDetails) {
-              throw new Error(JSON.stringify(r.exceptionDetails));
-            }
-            return r.result.value;
-          });
-        ws.addEventListener("message", (event) => {
-          const msg = JSON.parse(event.data);
-          if (msg.id && pending.has(msg.id)) {
-            pending.get(msg.id)(msg.result);
-            pending.delete(msg.id);
-          }
-        });
-        ws.addEventListener("open", () => resolve({ send, evaluate }));
-        ws.addEventListener("error", () => reject(new Error("CDP WebSocket failed")));
-      });
-
-      await cdp.send("Page.enable");
-      await cdp.send("Runtime.enable");
-      await cdp.send("Emulation.setDeviceMetricsOverride", {
+      await e2e.send("Page.enable");
+      await e2e.send("Runtime.enable");
+      await e2e.send("Emulation.setDeviceMetricsOverride", {
         width: 390,
         height: 844,
         deviceScaleFactor: 3,
         mobile: true,
       });
-      await cdp.send("Emulation.setTouchEmulationEnabled", {
+      await e2e.send("Emulation.setTouchEmulationEnabled", {
         enabled: true,
         maxTouchPoints: 5,
       });
       // Install the visualViewport stub BEFORE the page scripts run, so
       // launcher.js wires its listeners to the stub from the start.
-      await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
+      await e2e.send("Page.addScriptToEvaluateOnNewDocument", {
         source: VIEWPORT_STUB,
       });
-      await cdp.send("Page.navigate", { url: `http://localhost:${port}/` });
+      await e2e.send("Page.navigate", { url: `http://localhost:${port}/` });
 
-      // Boot.
+      // Boot. The page may still be mid-navigation when the first probe
+      // runs, so a throwing evaluate just means "keep waiting".
       assert.ok(
         await waitUntil(async () => {
-          const out = await cdp.evaluate(
-            "document.getElementById('output').textContent || ''",
-          );
-          return /WELCOME TO ADVENTURE/.test(out);
+          try {
+            const out = await e2e.evaluate(
+              "document.getElementById('output').textContent || ''",
+            );
+            return /WELCOME TO ADVENTURE/.test(out);
+          } catch {
+            return false;
+          }
         }, 180, 500),
         "game reached first output",
       );
@@ -269,22 +150,22 @@ test(
       for (const cmd of commands) {
         assert.ok(
           await waitUntil(
-            () => cdp.evaluate("window.adventureDebug.state.waitingForInput"),
+            () => e2e.evaluate("window.adventureDebug.state.waitingForInput"),
             60,
             150,
           ),
           `prompt visible before command "${cmd}"`,
         );
-        await cdp.send("Input.insertText", { text: cmd });
+        await e2e.send("Input.insertText", { text: cmd });
         await new Promise((r) => setTimeout(r, 120));
-        await cdp.send("Input.dispatchKeyEvent", {
+        await e2e.send("Input.dispatchKeyEvent", {
           type: "keyDown",
           key: "Enter",
           code: "Enter",
           windowsVirtualKeyCode: 13,
           nativeVirtualKeyCode: 13,
         });
-        await cdp.send("Input.dispatchKeyEvent", {
+        await e2e.send("Input.dispatchKeyEvent", {
           type: "keyUp",
           key: "Enter",
           code: "Enter",
@@ -292,7 +173,7 @@ test(
           nativeVirtualKeyCode: 13,
         });
         await new Promise((r) => setTimeout(r, 700));
-        const snap = await cdp.evaluate(SNAPSHOT);
+        const snap = await e2e.evaluate(SNAPSHOT);
         snapshots.push({ cmd, ...snap });
         containerHeights.push(snap.container.height);
       }
@@ -343,13 +224,13 @@ test(
 
       // Keyboard simulation: shrink the visual viewport and assert the
       // terminal shrinks in lockstep so the prompt stays in view.
-      const before = await cdp.evaluate(SNAPSHOT);
+      const before = await e2e.evaluate(SNAPSHOT);
       assert.equal(before.keyboardInset, 0, "no inset with the keyboard closed");
       // Open the keyboard: drop the visual viewport to roughly a phone
       // soft-keyboard size (about 300 px on an 844-px viewport).
-      await cdp.evaluate("window.visualViewport.__setHeight(544)");
+      await e2e.evaluate("window.visualViewport.__setHeight(544)");
       await new Promise((r) => setTimeout(r, 250));
-      const withKeyboard = await cdp.evaluate(SNAPSHOT);
+      const withKeyboard = await e2e.evaluate(SNAPSHOT);
       assert.ok(
         withKeyboard.keyboardInset > 200,
         `keyboard inset should track the ~300 px keyboard, got ${withKeyboard.keyboardInset}`,
@@ -366,19 +247,13 @@ test(
         `prompt should remain visible with the keyboard open (promptBottom=${withKeyboard.promptBottom}, visibleBottom=${withKeyboard.vv.offsetTop + withKeyboard.vv.height})`,
       );
       // Close the keyboard: the inset must relax back to 0.
-      await cdp.evaluate("window.visualViewport.__setHeight(844)");
+      await e2e.evaluate("window.visualViewport.__setHeight(844)");
       await new Promise((r) => setTimeout(r, 250));
-      const after = await cdp.evaluate(SNAPSHOT);
+      const after = await e2e.evaluate(SNAPSHOT);
       assert.equal(after.keyboardInset, 0, "inset should return to 0 when the keyboard closes");
       assert.equal(after.promptInView, true);
     } finally {
-      browser.kill();
-      server.kill();
-      try {
-        rmSync(profileDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
-      } catch {
-        // Chrome can still hold the scratch profile momentarily.
-      }
+      e2e.close();
     }
   },
 );
