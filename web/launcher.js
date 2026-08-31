@@ -195,6 +195,15 @@ function updateKeyboardInset({ scrollAfterResize = false } = {}) {
   if (inset !== currentKeyboardInset) {
     currentKeyboardInset = inset;
     main.style.setProperty("--keyboard-inset", `${inset}px`);
+    // Lock the document while the keyboard is up (CSS in index.html).
+    // Chrome shrinks the layout viewport with the keyboard, so the range
+    // that is a token 1px when closed balloons to the keyboard's height
+    // -- and a background drag spends it, uncovering body background
+    // below the buttons. The lock covers exactly the keyboard-open
+    // window (pull-to-refresh is meaningless then anyway) and releases
+    // on close, driven by this same measurement so there is one source
+    // of truth.
+    document.documentElement.classList.toggle("keyboard-open", inset > 0);
   }
   // Freeze the height once the keyboard has stopped opening, and thaw it
   // as soon as it starts closing or grows again. Everything that happens

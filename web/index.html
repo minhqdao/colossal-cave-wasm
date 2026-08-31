@@ -285,13 +285,26 @@
       }
       /* Pull-to-refresh needs a scroll range: browsers drop it on a page
          with nothing to scroll, and the document is measured against lvh,
-         so a layout that only fills svh has none. main is pinned and
-         sized off svh, so spending the range moves nothing. Keep this
-         query (the union) in step with the two mobile layouts below. */
+         so a layout that only fills svh has none. main is pinned, so
+         spending the token range moves nothing. Chrome shrinks the layout
+         viewport with the soft keyboard, though, which balloons the range
+         to the keyboard's height -- locked below while the keyboard is
+         up. Keep this query (the union) in step with the two mobile
+         layouts below. */
       @media (max-width: 560px), (max-height: 500px) and (pointer: coarse) {
         html,
         body {
           min-height: calc(100lvh + 1px);
+        }
+        /* The keyboard-open window only, toggled by launcher.js from the
+           same measurement that drives --keyboard-inset: the inflated
+           range must not be spendable (a drag would scroll the body and
+           uncover background below the buttons), yet pull-to-refresh has
+           to return the instant the keyboard is gone. */
+        html.keyboard-open,
+        html.keyboard-open body {
+          overflow: hidden;
+          overscroll-behavior: none;
         }
         main {
           --pad-x: 10px;
