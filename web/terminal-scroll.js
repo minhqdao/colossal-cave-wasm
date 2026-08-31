@@ -59,3 +59,39 @@ export function measureKeyboardInset(anchor, viewport, currentInset) {
   const naturalBottom = rect.bottom + currentInset;
   return Math.max(0, naturalBottom - visibleBottom);
 }
+
+/**
+ * How far a fresh measurement may exceed a held inset before it is
+ * trusted again. A soft keyboard is a couple of hundred px tall, so this
+ * covers one growing (emoji picker) or opening over a hold taken on a
+ * stray pixel, while staying well clear of the much smaller shifts a drag
+ * or a retracting toolbar produces.
+ */
+export const KEYBOARD_HEIGHT_TOLERANCE_PX = 80;
+
+/**
+ * Holds a keyboard inset steady while the soft keyboard is up.
+ *
+ * measureKeyboardInset is taken against `visualViewport.offsetTop +
+ * height`, so anything that moves the visual viewport -- a drag, the
+ * rubber-band at the end of one, iOS panning the focused field into view
+ * -- reads as the keyboard changing size, and chasing that resizes the
+ * terminal under the finger. Once the keyboard is up its size is known,
+ * so the caller freezes it and this returns the frozen value until the
+ * keyboard is gone (measured 0) or has grown past the tolerance.
+ *
+ * @param {number} measured px of the anchor's bottom hidden below the
+ *   visible area, as returned by measureKeyboardInset
+ * @param {number} held the frozen inset, or 0 when nothing is frozen
+ * @returns {number} the inset to apply (>= 0)
+ */
+export function holdKeyboardInset(measured, held) {
+  if (
+    held > 0 &&
+    measured > 0 &&
+    measured <= held + KEYBOARD_HEIGHT_TOLERANCE_PX
+  ) {
+    return held;
+  }
+  return measured;
+}
