@@ -55,7 +55,13 @@ const SNAPSHOT = `(() => {
   probe.remove();
   const mainComputed = main ? getComputedStyle(main).height : null;
   return {
-    doc: { scrollHeight: document.documentElement.scrollHeight, scrollTop: Math.round(document.documentElement.scrollTop), innerHeight: window.innerHeight, pageScrolls: document.documentElement.scrollHeight > window.innerHeight + 1 },
+    doc: {
+      scrollHeight: document.documentElement.scrollHeight,
+      scrollTop: Math.round(document.documentElement.scrollTop),
+      innerHeight: window.innerHeight,
+      pageScrolls: document.documentElement.scrollHeight > window.innerHeight + 1,
+      overflow: getComputedStyle(document.documentElement).overflow,
+    },
     vv: vv ? { height: Math.round(vv.height*100)/100, offsetTop: Math.round(vv.offsetTop*100)/100, scale: vv.scale } : null,
     dvh100, mainComputed, keyboardInset: Math.round(keyboardInset*100)/100,
     main: r(main),
@@ -92,6 +98,12 @@ const VIEWPORT_STUB = `
     __setHeight(h) { height = h; for (const fn of listeners.resize) fn(); },
     __setOffsetTop(t) { offsetTop = t; for (const fn of listeners.scroll) fn(); },
   };
+  // A real visualViewport fires scroll when the document scrolls -- the
+  // only way a page pan reaches the launcher. Forward it so a leaked
+  // drag reproduces device behavior; offsetTop stays 0 as in Chrome.
+  window.addEventListener('scroll', () => {
+    for (const fn of listeners.scroll) fn();
+  }, true);
   Object.defineProperty(window, 'visualViewport', { configurable: true, get: () => vv });
 })();
 `;
@@ -185,6 +197,13 @@ test(
           false,
           `page should not scroll after "${s.cmd}" (doc.scrollHeight=${s.doc.scrollHeight}, innerHeight=${s.doc.innerHeight})`,
         );
+        // The mechanism, not just the symptom: the mobile layout locks the
+        // document, so the viewport has no scroll to offer.
+        assert.equal(
+          s.doc.overflow,
+          "hidden",
+          `document should lock scrolling on the mobile layout (overflow=${s.doc.overflow})`,
+        );
       }
 
       // Invariant 2: the terminal container's height is bounded (a
@@ -252,6 +271,55 @@ test(
       const after = await e2e.evaluate(SNAPSHOT);
       assert.equal(after.keyboardInset, 0, "inset should return to 0 when the keyboard closes");
       assert.equal(after.promptInView, true);
+
+      // Regression: with the keyboard open, a background drag must neither
+      // scroll the page nor resize the terminal -- a panned main reads to
+      // the inset measurement as "the keyboard moved" (the phantom-resize
+      // bug the document lock in index.html kills at the root).
+      await e2e.evaluate("window.visualViewport.__setHeight(544)");
+      await new Promise((r) => setTimeout(r, 250));
+      // Force the document to overflow, the way mobile chrome does.
+      await e2e.evaluate(`(() => {
+        const d = document.createElement('div');
+        d.id = 'drag-spacer';
+        d.style.height = '1200px';
+        document.body.appendChild(d);
+      })()`);
+      await new Promise((r) => setTimeout(r, 200));
+      const beforeDrag = await e2e.evaluate(SNAPSHOT);
+      // The lock contains the overflow: not one scrollable pixel added.
+      assert.equal(
+        beforeDrag.doc.pageScrolls,
+        false,
+        `spacer must not make the page scrollable (scrollHeight=${beforeDrag.doc.scrollHeight}, innerHeight=${beforeDrag.doc.innerHeight})`,
+      );
+      // Body padding above the title: outside the terminal, on the page.
+      await e2e.send("Input.synthesizeScrollGesture", {
+        x: 195,
+        y: 8,
+        xDistance: 0,
+        yDistance: -220,
+        gestureSourceType: "touch",
+        speed: 800,
+      });
+      await new Promise((r) => setTimeout(r, 300));
+      const afterDrag = await e2e.evaluate(SNAPSHOT);
+      assert.equal(
+        afterDrag.doc.scrollTop,
+        0,
+        `background drag should not scroll the page (scrollTop=${afterDrag.doc.scrollTop})`,
+      );
+      assert.equal(
+        afterDrag.container.height,
+        beforeDrag.container.height,
+        `background drag should not resize the terminal (before=${beforeDrag.container.height}, after=${afterDrag.container.height})`,
+      );
+      assert.equal(
+        afterDrag.keyboardInset,
+        beforeDrag.keyboardInset,
+        `background drag should not change the keyboard inset (before=${beforeDrag.keyboardInset}, after=${afterDrag.keyboardInset})`,
+      );
+      await e2e.evaluate("document.getElementById('drag-spacer')?.remove()");
     } finally {
       e2e.close();
     }

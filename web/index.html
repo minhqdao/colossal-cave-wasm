@@ -283,19 +283,38 @@
           opacity: 0;
         }
       }
+      /* Lock the page: unlocked, mobile chrome keeps the document a
+         toolbar taller than the viewport, and a background drag scrolling
+         it reads to the keyboard-inset measurement (launcher.js) as
+         keyboard motion, resizing the terminal under the finger. svh
+         because it never moves when chrome retracts; root overflow is
+         what propagates the lock to the viewport. Keep this query (the
+         union) in step with the two mobile layouts below. */
+      @media (max-width: 560px), (max-height: 500px) and (pointer: coarse) {
+        html,
+        body {
+          height: 100svh;
+          overflow: hidden;
+          overscroll-behavior: none;
+        }
+        body {
+          /* The base min-height:100dvh would outstay svh while the
+             toolbar is expanded, pushing past the lock without this. */
+          min-height: 0;
+        }
+      }
       @media (max-width: 560px) {
         body {
           padding: 16px 10px;
         }
         main {
-          /* Bounded so the page never grows with the game output: the
-             terminal stays a fixed window onto the transcript and scrolls
-             internally, like a real terminal. var(--keyboard-inset) is
-             driven by visualViewport (see launcher.js) so the soft keyboard
-             still leaves the prompt in view. */
+          /* Fixed window onto the transcript, scrolling internally: one
+             body content-box (the lock above makes it viewport-sized)
+             less the keyboard inset, which launcher.js measures from
+             visualViewport so the prompt rides above the soft keyboard. */
           display: flex;
           flex-direction: column;
-          height: calc(100dvh - 32px - var(--keyboard-inset, 0px));
+          height: calc(100% - var(--keyboard-inset, 0px));
         }
         #subtitle {
           font-size: 11px;
@@ -324,11 +343,11 @@
           padding: 10px;
         }
         main {
-          /* Short-landscape: see the portrait block above for the bounded-
-             terminal rationale; only the chrome height differs here. */
+          /* Short landscape: identical to portrait's main above; the
+             smaller chrome comes from the body padding in this block. */
           display: flex;
           flex-direction: column;
-          height: calc(100dvh - 20px - var(--keyboard-inset, 0px));
+          height: calc(100% - var(--keyboard-inset, 0px));
         }
         #terminal-container {
           flex: 1 1 0;
