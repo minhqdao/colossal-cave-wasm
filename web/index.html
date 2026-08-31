@@ -293,19 +293,6 @@
         body {
           min-height: calc(100lvh + 1px);
         }
-        /* While the soft keyboard is up, the visual viewport is a short
-           window into the taller layout viewport; any remaining scroll
-           range lets it pan, sliding the pinned main up and uncovering
-           body below the buttons. Pull-to-refresh is not wanted with the
-           keyboard open, so spend the range: clamp the document to the
-           small viewport and lock the root. */
-        html.keyboard-open {
-          overflow: hidden;
-        }
-        html.keyboard-open,
-        html.keyboard-open body {
-          min-height: 100svh;
-        }
         main {
           --pad-x: 10px;
           /* Pinned: the keyboard inset is measured off main's rect, so a
@@ -328,17 +315,19 @@
       @media (max-width: 560px) {
         main {
           --pad-y: 16px;
-          /* Fixed window onto the transcript, scrolling internally: svh
-             less the chrome and the keyboard inset launcher.js measures
-             so the prompt rides above the keyboard. svh, not a share of
-             body -- body runs a pixel past lvh to keep pull-to-refresh. */
+          /* Fixed window onto the transcript, scrolling internally. One
+             --pad-y only (main is pinned at top: --pad-y): the element's
+             natural bottom sits flush with the 100svh layout viewport,
+             so measureKeyboardInset (launcher.js) returns the keyboard's
+             exact hidden height and the box shrinks in lockstep with it
+             -- once per animation frame, no overshoot to recover from.
+             The constant padding then holds the buttons a fixed --pad-y
+             above the box edge, i.e. above the keyboard, with nothing
+             that grows during the animation. */
           display: flex;
           flex-direction: column;
-          height: calc(
-            100svh - var(--pad-y) * 2 - var(--keyboard-inset, 0px)
-          );
-          /* Breathing room over the keyboard, none while it is closed. */
-          padding-bottom: min(16px, var(--keyboard-inset, 0px));
+          height: calc(100svh - var(--pad-y) - var(--keyboard-inset, 0px));
+          padding-bottom: var(--pad-y);
         }
         #subtitle {
           font-size: 11px;
@@ -369,10 +358,8 @@
              smaller chrome comes from --pad-y in this block. */
           display: flex;
           flex-direction: column;
-          height: calc(
-            100svh - var(--pad-y) * 2 - var(--keyboard-inset, 0px)
-          );
-          padding-bottom: min(8px, var(--keyboard-inset, 0px));
+          height: calc(100svh - var(--pad-y) - var(--keyboard-inset, 0px));
+          padding-bottom: var(--pad-y);
         }
         #terminal-container {
           flex: 1 1 0;

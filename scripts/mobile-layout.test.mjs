@@ -32,9 +32,9 @@ import { findChrome, startChromeE2E, waitUntil } from "./chrome-e2e.mjs";
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const port = Number(process.argv[2]) || 8903;
 
-// Mirrors the main padding-bottom (min(Npx, keyboard-inset)) of the
-// portrait block in web/index.html -- the device emulated below is
-// portrait, so that is the rule under test. Keep in step with the CSS.
+// Mirrors the constant main padding-bottom (--pad-y) of the portrait
+// block in web/index.html -- the device emulated below is portrait, so
+// that is the rule under test. Keep in step with the CSS.
 const BREATHING_ROOM_PX = 16;
 
 const CHROME = findChrome();
@@ -307,19 +307,6 @@ test(
           withKeyboard.actionsGap <= BREATHING_ROOM_PX + 1,
         `buttons should clear the keyboard by ${BREATHING_ROOM_PX} px, got ${withKeyboard.actionsGap}`,
       );
-      // The document locks for exactly the keyboard-open window: with
-      // the keyboard occluding the layout, any remaining range is
-      // pannable into (browser contract), and the lock removes the
-      // overhang being panned into -- not just the scrollbar.
-      assert.equal(
-        withKeyboard.doc.overflow,
-        "hidden",
-        `document should lock while the keyboard is open (overflow=${withKeyboard.doc.overflow})`,
-      );
-      assert.ok(
-        withKeyboard.doc.scrollRange <= 1,
-        `no scroll range with the keyboard open (scrollRange=${withKeyboard.doc.scrollRange})`,
-      );
       // Close the keyboard: the inset must relax back to 0.
       await e2e.evaluate("window.visualViewport.__setHeight(844)");
       await new Promise((r) => setTimeout(r, 250));
@@ -331,29 +318,14 @@ test(
         before.actionsGap,
         `keyboard closing should restore the buttons' gap (before=${before.actionsGap}, after=${after.actionsGap})`,
       );
-      // The lock releases with the keyboard: pull-to-refresh must work
-      // again the moment it is meaningful again -- token range and root
-      // overscroll both restored.
-      assert.equal(
-        after.doc.overflow,
-        "visible",
-        `document should unlock once the keyboard closes (overflow=${after.doc.overflow})`,
-      );
-      assert.equal(
-        after.doc.overscrollY,
-        "auto",
-        `pull-to-refresh should return once the keyboard closes (overscrollY=${after.doc.overscrollY})`,
-      );
-      assert.ok(
-        after.doc.scrollRange > 0 && after.doc.scrollRange <= 2,
-        `closed state must keep the token pull-to-refresh range (scrollRange=${after.doc.scrollRange})`,
-      );
 
-      // Regression: with the keyboard open, a background drag must spend
-      // nothing: no scroll (the document is clamped + locked, so there is
-      // no occluded strip to pan into), no resize, no inset change. The
-      // gap on real devices was the body background sliding up under the
-      // fixed main -- scrollTop is what records that.
+      // Regression: with the keyboard open, a background drag must not
+      // resize the terminal -- a panned main reads to the inset
+      // measurement as "the keyboard moved" (the phantom-resize bug).
+      // The page is scrollable now (pull-to-refresh needs a range), so
+      // what is left to prove is that spending it moves nothing: main is
+      // sized off svh, which neither the scroll nor a retracting toolbar
+      // can grow.
       await e2e.evaluate("window.visualViewport.__setHeight(544)");
       await new Promise((r) => setTimeout(r, 250));
       const beforeDrag = await e2e.evaluate(SNAPSHOT);
@@ -395,17 +367,17 @@ test(
       });
       await new Promise((r) => setTimeout(r, 300));
       const afterDrag = await e2e.evaluate(SNAPSHOT);
-      // The keyboard-open lock leaves at most the token range, and it is
-      // overflow-hidden, so a drag moves the document no further than one
-      // px; anything past that is the gap bug.
+      // Shifting by the scroll range is the gesture doing its job (and is
+      // invisible at one px); anything beyond it is the bug.
       assert.ok(
-        Math.abs(afterDrag.doc.scrollTop - beforeDrag.doc.scrollTop) <= 1,
-        `background drag should not scroll the locked document (before=${beforeDrag.doc.scrollTop}, after=${afterDrag.doc.scrollTop})`,
+        Math.abs(afterDrag.main.bottom - beforeDrag.main.bottom) <=
+          Math.max(1, beforeDrag.doc.scrollRange),
+        `background drag should not move the layout (before=${beforeDrag.main.bottom}, after=${afterDrag.main.bottom}, range=${beforeDrag.doc.scrollRange})`,
       );
       assert.equal(
         afterDrag.container.height,
         beforeDrag.container.height,
-        `background drag should not resize the terminal (before=${beforeDrag.container.height}, after=${beforeDrag.container.height})`,
+        `background drag should not resize the terminal (before=${beforeDrag.container.height}, after=${afterDrag.container.height})`,
       );
       assert.equal(
         afterDrag.keyboardInset,
