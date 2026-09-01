@@ -10,7 +10,6 @@ import {
 } from "./terminal-output.js";
 import { isTouchPointer, moveInputCaretToEnd } from "./terminal-input.js";
 import {
-  holdKeyboardInset,
   isPinnedToBottom,
   measureKeyboardInset,
   scrollTerminalToBottom,
@@ -165,22 +164,12 @@ window.addEventListener("resize", () => {
 });
 
 // Touch-only: keep the prompt in view when the soft keyboard opens or
-// closes by shrinking main so the terminal's bottom -- where the latest
-// output and the input line live -- rides just above the visible area.
-// The size is then frozen for as long as the keyboard is up (see
-// holdKeyboardInset): main is pinned, so a pan moves the visible region
-// without moving main, and chasing that resizes the terminal under the
-// finger. Desktop is excluded: the var is unused outside the mobile media
-// query and a desktop window resize is already handled above.
-//
-// How long the measurement has to stop changing for the keyboard to count
-// as finished opening. The animation fires a resize per frame, so this
-// only expires once it has ended -- and a pan during the animation then
-// just delays the freeze instead of being latched in.
-const KEYBOARD_SETTLE_MS = 120;
+// closes (and when the page pans during the keyboard animation) by
+// shrinking main so the terminal's bottom -- where the latest output and
+// the input line live -- rides just above the visible area. Desktop is
+// excluded: the var is unused outside the mobile media query and a
+// desktop window resize is already handled above.
 let currentKeyboardInset = 0;
-let heldKeyboardInset = 0;
-let keyboardSettleTimer = 0;
 function updateKeyboardInset({ scrollAfterResize = false } = {}) {
   if (!usesTouchInput() || !main) return;
   const viewport = window.visualViewport;
@@ -190,23 +179,10 @@ function updateKeyboardInset({ scrollAfterResize = false } = {}) {
   // was pinned in the old layout would no longer read as pinned after.
   // Someone who had scrolled up to inspect history is left where they are.
   const wasPinned = scrollAfterResize && isPinnedToBottom(screen);
-  const measured = measureKeyboardInset(main, viewport, currentKeyboardInset);
-  const inset = holdKeyboardInset(measured, heldKeyboardInset);
+  const inset = measureKeyboardInset(main, viewport, currentKeyboardInset);
   if (inset !== currentKeyboardInset) {
     currentKeyboardInset = inset;
     main.style.setProperty("--keyboard-inset", `${inset}px`);
-  }
-  // Freeze the height once the keyboard has stopped opening, and thaw it
-  // as soon as it starts closing or grows again. Everything that happens
-  // in between is a drag or a toolbar, not the keyboard, and the terminal
-  // must ride them out at a constant size.
-  clearTimeout(keyboardSettleTimer);
-  if (inset === 0) {
-    heldKeyboardInset = 0;
-  } else if (inset !== heldKeyboardInset) {
-    keyboardSettleTimer = setTimeout(() => {
-      heldKeyboardInset = currentKeyboardInset;
-    }, KEYBOARD_SETTLE_MS);
   }
   if (wasPinned) {
     outputRenderer.schedule();
@@ -218,9 +194,8 @@ if (window.visualViewport) {
   window.visualViewport.addEventListener("resize", () =>
     updateKeyboardInset({ scrollAfterResize: true }),
   );
-  // Panning (visualViewport scroll) shifts the measurement without the
-  // keyboard having moved, so the hold above swallows it. This listener
-  // stays because some WebViews raise the keyboard without a resize.
+  // Panning (visualViewport scroll) does not change what is hidden --
+  // just where the visible region sits -- so only re-measure.
   window.visualViewport.addEventListener("scroll", () =>
     updateKeyboardInset(),
   );

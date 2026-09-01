@@ -2,8 +2,7 @@
 // need a DOM: isPinnedToBottom is pure arithmetic, and measureKeyboardInset
 // takes plain stubs for the anchor and viewport so the geometry can be
 // driven deterministically. The self-correcting property of the inset
-// formula (the heart of the keyboard-shrink fix) is verified here, along
-// with the hold that keeps the terminal still while the keyboard is up.
+// formula (the heart of the keyboard-shrink fix) is verified here.
 //
 //   node --test scripts/terminal-scroll.test.mjs
 
@@ -11,9 +10,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  holdKeyboardInset,
   isPinnedToBottom,
-  KEYBOARD_HEIGHT_TOLERANCE_PX,
   measureKeyboardInset,
   scrollTerminalToBottom,
 } from "../web/terminal-scroll.js";
@@ -123,51 +120,4 @@ test("measureKeyboardInset: tracks visible-bottom changes from panning", () => {
     measureKeyboardInset(anchor(828), viewport({ height, offsetTop: 100 }), 0),
     828 - (100 + height),
   );
-});
-
-test("holdKeyboardInset: nothing held -> measures pass through", () => {
-  // While the keyboard is opening there is nothing to hold yet, so every
-  // measurement is applied and the terminal tracks the animation.
-  assert.equal(holdKeyboardInset(0, 0), 0);
-  assert.equal(holdKeyboardInset(120, 0), 120);
-  assert.equal(holdKeyboardInset(284, 0), 284);
-});
-
-test("holdKeyboardInset: holds through a pan", () => {
-  // The bug this fixes: dragging with the keyboard up moves the visual
-  // region, the measurement drops by the drag distance, and the terminal
-  // grew to chase it. Both directions of the pan are swallowed.
-  assert.equal(holdKeyboardInset(284, 284), 284);
-  assert.equal(holdKeyboardInset(244, 284), 284, "drag up reveals more");
-  assert.equal(holdKeyboardInset(324, 284), 284, "rubber-band hides more");
-  assert.equal(holdKeyboardInset(284 - 60, 284), 284, "toolbar retracts");
-});
-
-test("holdKeyboardInset: releases when the keyboard goes away", () => {
-  assert.equal(holdKeyboardInset(0, 284), 0);
-});
-
-test("holdKeyboardInset: trusts a keyboard that grew past the tolerance", () => {
-  // A taller keyboard (emoji picker, rotation) has to win eventually, or
-  // the terminal stays too tall underneath it. So does a real keyboard
-  // opening over a hold that was taken on a stray pixel of scroll.
-  assert.equal(
-    holdKeyboardInset(2 + KEYBOARD_HEIGHT_TOLERANCE_PX, 1),
-    2 + KEYBOARD_HEIGHT_TOLERANCE_PX,
-  );
-  assert.equal(holdKeyboardInset(284, 1), 284);
-  // Just inside the tolerance is still held: that is the whole point.
-  assert.equal(holdKeyboardInset(284 + KEYBOARD_HEIGHT_TOLERANCE_PX, 284), 284);
-});
-
-test("holdKeyboardInset: a keyboard session end to end", () => {
-  // Opens (tracked), settles, rides out a drag, then closes.
-  const held = 284;
-  assert.equal(holdKeyboardInset(100, 0), 100, "opening");
-  assert.equal(holdKeyboardInset(284, 0), 284, "open");
-  assert.equal(holdKeyboardInset(284, held), held, "settled");
-  assert.equal(holdKeyboardInset(220, held), held, "dragged");
-  assert.equal(holdKeyboardInset(284, held), held, "dragged back");
-  assert.equal(holdKeyboardInset(0, held), 0, "closed");
-  assert.equal(holdKeyboardInset(0, 0), 0, "stays closed");
 });

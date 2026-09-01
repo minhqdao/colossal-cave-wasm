@@ -32,9 +32,9 @@ import { findChrome, startChromeE2E, waitUntil } from "./chrome-e2e.mjs";
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const port = Number(process.argv[2]) || 8903;
 
-// Mirrors the constant main padding-bottom (--pad-y) of the portrait
-// block in web/index.html -- the device emulated below is portrait, so
-// that is the rule under test. Keep in step with the CSS.
+// Mirrors the main padding-bottom (min(Npx, keyboard-inset)) of the
+// portrait block in web/index.html -- the device emulated below is
+// portrait, so that is the rule under test. Keep in step with the CSS.
 const BREATHING_ROOM_PX = 16;
 
 const CHROME = findChrome();
@@ -329,33 +329,6 @@ test(
       await e2e.evaluate("window.visualViewport.__setHeight(544)");
       await new Promise((r) => setTimeout(r, 250));
       const beforeDrag = await e2e.evaluate(SNAPSHOT);
-
-      // Regression: panning with the keyboard up must not resize the
-      // terminal. main is pinned, so moving the visible region moves the
-      // measurement without moving main; without the hold, the terminal
-      // grows by the pan distance and the layout breathes on every drag
-      // (and on iOS, on every rubber-band).
-      await e2e.evaluate("window.visualViewport.__setOffsetTop(40)");
-      await new Promise((r) => setTimeout(r, 250));
-      const panned = await e2e.evaluate(SNAPSHOT);
-      assert.equal(
-        panned.vv.offsetTop,
-        40,
-        `the pan should have applied (offsetTop=${panned.vv.offsetTop})`,
-      );
-      assert.equal(
-        panned.container.height,
-        beforeDrag.container.height,
-        `panning must not resize the terminal (before=${beforeDrag.container.height}, after=${panned.container.height})`,
-      );
-      assert.equal(
-        panned.keyboardInset,
-        beforeDrag.keyboardInset,
-        `panning must not change the keyboard inset (before=${beforeDrag.keyboardInset}, after=${panned.keyboardInset})`,
-      );
-      await e2e.evaluate("window.visualViewport.__setOffsetTop(0)");
-      await new Promise((r) => setTimeout(r, 250));
-
       // Body padding above the title: outside the terminal, on the page.
       await e2e.send("Input.synthesizeScrollGesture", {
         x: 195,

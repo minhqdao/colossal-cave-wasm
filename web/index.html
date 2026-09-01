@@ -285,9 +285,9 @@
       }
       /* Pull-to-refresh needs a scroll range: browsers drop it on a page
          with nothing to scroll, and the document is measured against lvh,
-         so a layout that only fills svh has none. main is pinned, so
-         spending the token range moves nothing. Keep this query (the
-         union) in step with the two mobile layouts below. */
+         so a layout that only fills svh has none. main is pinned and
+         sized off svh, so spending the range moves nothing. Keep this
+         query (the union) in step with the two mobile layouts below. */
       @media (max-width: 560px), (max-height: 500px) and (pointer: coarse) {
         html,
         body {
@@ -315,19 +315,17 @@
       @media (max-width: 560px) {
         main {
           --pad-y: 16px;
-          /* Fixed window onto the transcript, scrolling internally. One
-             --pad-y only (main is pinned at top: --pad-y): the element's
-             natural bottom sits flush with the 100svh layout viewport,
-             so measureKeyboardInset (launcher.js) returns the keyboard's
-             exact hidden height and the box shrinks in lockstep with it
-             -- once per animation frame, no overshoot to recover from.
-             The constant padding then holds the buttons a fixed --pad-y
-             above the box edge, i.e. above the keyboard, with nothing
-             that grows during the animation. */
+          /* Fixed window onto the transcript, scrolling internally: svh
+             less the chrome and the keyboard inset launcher.js measures
+             so the prompt rides above the keyboard. svh, not a share of
+             body -- body runs a pixel past lvh to keep pull-to-refresh. */
           display: flex;
           flex-direction: column;
-          height: calc(100svh - var(--pad-y) - var(--keyboard-inset, 0px));
-          padding-bottom: var(--pad-y);
+          height: calc(
+            100svh - var(--pad-y) * 2 - var(--keyboard-inset, 0px)
+          );
+          /* Breathing room over the keyboard, none while it is closed. */
+          padding-bottom: min(16px, var(--keyboard-inset, 0px));
         }
         #subtitle {
           font-size: 11px;
@@ -358,8 +356,10 @@
              smaller chrome comes from --pad-y in this block. */
           display: flex;
           flex-direction: column;
-          height: calc(100svh - var(--pad-y) - var(--keyboard-inset, 0px));
-          padding-bottom: var(--pad-y);
+          height: calc(
+            100svh - var(--pad-y) * 2 - var(--keyboard-inset, 0px)
+          );
+          padding-bottom: min(8px, var(--keyboard-inset, 0px));
         }
         #terminal-container {
           flex: 1 1 0;
