@@ -72,8 +72,21 @@ let runId = 0;
 let lastWorkerMessageAt = 0;
 /** @type {number | undefined} */
 let inputResponseTimer;
-const maxStartupRetries = 1;
-const workerStartupTimeoutMs = 15_000;
+const maxStartupRetries = 2;
+// A healthy boot finishes in ~1-2s (600KB total: launcher + worker +
+// wasm glue + wasm binary), so 8s per attempt is still ~4-8x headroom
+// while keeping the worst case bounded: 3 attempts x 8s + 0.6s + 1.2s
+// backoff ~= 26s, slightly under the old 2 x 15s = 30s budget despite
+// the extra attempt. The 20s boot watchdog may fire during the third
+// attempt; the launcher's final status then overwrites it with the
+// specific failure.
+const workerStartupTimeoutMs = 8_000;
+// Transient fetch blips (worker script, wasm glue, wasm binary) are the
+// common intermittent boot failure; an immediate retry often re-hits the
+// same blip, so retries back off linearly (600ms, then 1200ms) to let the
+// network settle. Restart/pagehide bumps runId, which aborts a pending
+// retry via the currentRunId check in launchWorker/scheduleStartupRetry.
+const startupRetryBaseDelayMs = 600;
 // The game answers a submitted line within a few milliseconds; the worker is
 // also the only thing that can ever clear the "waiting for input" state, so
 // a silent gap after submitting means iOS suspended the process mid-flight.
@@ -1132,8 +1145,25 @@ async function start() {
  * @param {number} currentRunId
  * @param {number} [attempt]
  */
+function scheduleStartupRetry(buffer, keys, currentRunId, attempt) {
+  const baseAttempt = attempt ?? 0;
+  const nextAttempt = baseAttempt + 1;
+  const delayMs = startupRetryBaseDelayMs * nextAttempt;
+  setTimeout(() => {
+    if (currentRunId !== runId) return;
+    launchWorker(buffer, keys, currentRunId, nextAttempt);
+  }, delayMs);
+}
+
+/**
+ * @param {SharedArrayBuffer} buffer
+ * @param {SharedArrayBuffer} keys
+ * @param {number} currentRunId
+ * @param {number} [attempt]
+ */
 function launchWorker(buffer, keys, currentRunId, attempt = 0) {
   if (currentRunId !== runId) return;
+  const currentAttempt = attempt ?? 0;
 
   /** @type {Worker | undefined} */
   let createdWorker;
@@ -1142,8 +1172,8 @@ function launchWorker(buffer, keys, currentRunId, attempt = 0) {
       type: "module",
     });
   } catch (error) {
-    if (attempt < maxStartupRetries) {
-      launchWorker(buffer, keys, currentRunId, attempt + 1);
+    if (currentAttempt < maxStartupRetries) {
+      scheduleStartupRetry(buffer, keys, currentRunId, currentAttempt);
       return;
     }
     throw error;
@@ -1168,8 +1198,8 @@ function launchWorker(buffer, keys, currentRunId, attempt = 0) {
     worker = undefined;
 
     if (currentRunId !== runId) return;
-    if (!hasStarted && attempt < maxStartupRetries) {
-      launchWorker(buffer, keys, currentRunId, attempt + 1);
+    if (!hasStarted && currentAttempt < maxStartupRetries) {
+      scheduleStartupRetry(buffer, keys, currentRunId, currentAttempt);
       return;
     }
 

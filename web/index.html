@@ -470,9 +470,14 @@
       //    file), and Pages deployments now ship the entry as one
       //    self-contained bundle whose bindings cannot skew. The
       //    sessionStorage guard mirrors the coi-serviceworker pattern: at
-      //    most one recovery reload per system per session, never a loop.
-      // 2. Module fetch failures (404/OMT/network) fire the same event with
-      //    no message; after the recovery attempt those surface as text.
+      //    most one recovery reload per session, never a loop.
+      // 2. Module fetch failures (404/OMT/transient network) fire the same
+      //    event with no message; those get the same single guarded reload
+      //    (a transient blip usually clears on retry) and only then surface
+      //    as text. Non-script resource errors (favicons, images) are
+      //    ignored: they fire the identical capture-phase event but cannot
+      //    fail the boot. Unhandled promise rejections (dynamic import()
+      //    failures) are folded into the same path.
       // 3. A watchdog for everything that slips past (no error event, or a
       //    worker that dies before its first output): if the terminal still
       //    shows only the static LOADING... line after 20s, say so. The
@@ -492,55 +497,95 @@
           status.hidden = false;
         }
 
+        function isBootDone() {
+          return Boolean(document.documentElement.dataset.adventureBootDone);
+        }
+
+        // Only boot-entry scripts can fail the boot. Icons, images and
+        // fonts fire the same capture-phase error event with no message;
+        // treating those as fatal is the classic false-positive
+        // ("favicon 404" -> "game failed to load").
+        function isIgnorableResourceTarget(target) {
+          if (!target || target === window) return false;
+          var tag = (target.tagName || "").toUpperCase();
+          return tag !== "SCRIPT";
+        }
+
+        // A skew-induced instantiation error -- or a transient fetch blip --
+        // is usually recoverable by one reload; if it persists (this session
+        // already retried), leave a visible diagnosis instead of looping.
+        // sessionStorage can throw in some private modes; a failed read just
+        // means "do not reload", which is the safe direction. Both boot-guard
+        // branches share the one key, so the guard reloads at most once per
+        // session in total. Returns true when a reload was issued.
+        function tryRecoveryReload() {
+          var retriedThisSession = false;
+          try {
+            retriedThisSession = Boolean(sessionStorage.getItem(recoveryKey));
+          } catch {
+            retriedThisSession = true;
+          }
+          if (retriedThisSession) return false;
+          if (!/^https?:$/.test(window.location.protocol)) return false;
+          try {
+            sessionStorage.setItem(recoveryKey, "1");
+          } catch {
+            // Without storage the reload cannot be guarded; skip it.
+            return false;
+          }
+          window.location.reload();
+          return true;
+        }
+
+        function handleBootError(message, target) {
+          if (isBootDone()) return;
+          if (isIgnorableResourceTarget(target)) return;
+          if (!message) {
+            if (tryRecoveryReload()) return;
+            showBootStatus(
+              "The game failed to load. Reload the page to retry.",
+            );
+            return;
+          }
+          if (tryRecoveryReload()) return;
+          showBootStatus(
+            "Failed to load: " +
+              message +
+              " (a reload did not help; try a hard reload / clearing the site data)",
+          );
+        }
+
         window.addEventListener(
           "error",
           function (event) {
-            if (document.documentElement.dataset.adventureBootDone) return;
-            var hadMessage = Boolean(
-              event.message &&
-              // Module scripts report instantiation errors on window;
-              // resource load errors carry the failed element instead.
-              !(event.target && event.target !== window),
-            );
-            if (!hadMessage) {
-              showBootStatus(
-                (event.message || "The game failed to load.") +
-                  " Reload the page to retry.",
-              );
-              return;
-            }
-            // A skew-induced instantiation error is usually recoverable by
-            // one reload; if it persists (this session already retried),
-            // leave a visible diagnosis instead of looping. sessionStorage
-            // can throw in some private modes; a failed read just means
-            // "do not reload", which is the safe direction.
-            var retriedThisSession = false;
-            try {
-              retriedThisSession = Boolean(sessionStorage.getItem(recoveryKey));
-            } catch {
-              retriedThisSession = true;
-            }
-            if (
-              !retriedThisSession &&
-              /^https?:$/.test(window.location.protocol)
-            ) {
-              try {
-                sessionStorage.setItem(recoveryKey, "1");
-              } catch {
-                // Without storage the reload cannot be guarded; skip it.
-                return;
-              }
-              window.location.reload();
-              return;
-            }
-            showBootStatus(
-              "Failed to load: " +
-                event.message +
-                " (a reload did not help; try a hard reload / clearing the site data)",
-            );
+            // Module scripts report instantiation errors on window;
+            // resource load errors carry the failed element instead.
+            var target =
+              event.target && event.target !== window
+                ? event.target
+                : window;
+            handleBootError(event.message || "", target);
           },
           true,
         );
+
+        window.addEventListener("unhandledrejection", function (event) {
+          if (isBootDone()) return;
+          var reason = event.reason;
+          var message = "";
+          if (typeof reason === "string") {
+            message = reason;
+          } else if (reason && typeof reason.message === "string") {
+            message = reason.message;
+          }
+          try {
+            event.preventDefault();
+          } catch {
+            // Some shims expose a read-only preventDefault; the guard's
+            // own handling below is what matters.
+          }
+          handleBootError(message, window);
+        });
 
         setTimeout(function () {
           if (document.documentElement.dataset.adventureBootDone) return;
