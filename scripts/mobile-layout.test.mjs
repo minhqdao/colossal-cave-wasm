@@ -505,3 +505,95 @@ test(
     }
   },
 );
+
+// The touch shell pins main's top padding (see --pad-y in web/index.html)
+// while only the height shrinks when the keyboard opens the layout. This
+// rehearses exactly that on a live document: shrink the emulated viewport
+// (what resizes-content does on Android when the keyboard opens) and
+// require main's top edge to stay put -- the "same padding open or closed"
+// contract. Both ends stay clear of the 500px short-landscape retune,
+// which intentionally changes the chrome.
+test(
+  "touch shell keeps the same top padding across viewport heights",
+  { skip: skipReason, timeout: 120_000 },
+  async () => {
+    const e2e = await startChromeE2E({
+      chrome: CHROME,
+      port: port + 2,
+      serve: "web",
+      debugPort: 9850 + (process.pid % 200),
+      profilePrefix: "colossal-cave-shell-profile",
+    });
+    try {
+      await e2e.send("Page.enable");
+      await e2e.send("Runtime.enable");
+      const TOP_PROBE = `(() => {
+        const main = document.querySelector('main');
+        const b = main.getBoundingClientRect();
+        const cs = getComputedStyle(main);
+        return {
+          rectTop: Math.round(b.top * 100) / 100,
+          position: cs.position,
+          padY: cs.getPropertyValue('--pad-y').trim(),
+        };
+      })()`;
+      const geometries = [
+        { name: "phone portrait", width: 390, tall: 844, short: 600 },
+        { name: "big portrait", width: 800, tall: 1280, short: 800 },
+      ];
+      for (const g of geometries) {
+        await e2e.send("Emulation.setDeviceMetricsOverride", {
+          width: g.width,
+          height: g.tall,
+          deviceScaleFactor: 2,
+          mobile: true,
+        });
+        await e2e.send("Emulation.setTouchEmulationEnabled", {
+          enabled: true,
+          maxTouchPoints: 5,
+        });
+        await e2e.send("Page.navigate", {
+          url: `http://localhost:${port + 2}/`,
+        });
+        assert.ok(
+          await waitUntil(async () => {
+            try {
+              return await e2e.evaluate("!!document.querySelector('main')");
+            } catch {
+              return false;
+            }
+          }, 60, 150),
+          `${g.name}: page loaded`,
+        );
+        await new Promise((r) => setTimeout(r, 400));
+        const tall = await e2e.evaluate(TOP_PROBE);
+        assert.equal(
+          tall.position,
+          "fixed",
+          `${g.name}: touch shell must pin main (got ${tall.position})`,
+        );
+        // Shrink live, without reload: this is the keyboard opening under
+        // resizes-content -- layout and visual viewports shrink together.
+        await e2e.send("Emulation.setDeviceMetricsOverride", {
+          width: g.width,
+          height: g.short,
+          deviceScaleFactor: 2,
+          mobile: true,
+        });
+        await new Promise((r) => setTimeout(r, 500));
+        const short = await e2e.evaluate(TOP_PROBE);
+        assert.ok(
+          Math.abs(short.rectTop - tall.rectTop) <= 1,
+          `${g.name}: same top padding open or closed (tall=${tall.rectTop}, short=${short.rectTop})`,
+        );
+        assert.equal(
+          short.padY,
+          tall.padY,
+          `${g.name}: --pad-y must not retune (tall=${tall.padY}, short=${short.padY})`,
+        );
+      }
+    } finally {
+      e2e.close();
+    }
+  },
+);

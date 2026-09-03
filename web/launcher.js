@@ -644,7 +644,15 @@ function pinScroll() {
     window.scrollY <= 0
   )
     return;
-  if (performance.now() < busyUntil + 260) return;
+  // iOS only: never mid-transition -- resetting the page while the inset
+  // animation runs fed back into the measurement and oscillated (blue17).
+  // Android (resize mode, gate never armed) drives no inset animation, so
+  // the pin applies immediately: that keeps a focus nudge from lingering
+  // long enough to hide the toolbar and shift the whole column upward on
+  // keyboard open. The reset itself cannot loop: once scrollY is back at 0
+  // there is no further scroll event, and visualViewport handlers ignore
+  // frames inside the transition window anyway.
+  if (gateArmed && performance.now() < busyUntil + 260) return;
   window.scrollTo(0, 0);
 }
 window.addEventListener("scroll", pinScroll, { passive: true });
