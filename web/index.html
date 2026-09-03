@@ -311,9 +311,23 @@
           opacity: 0;
         }
       }
-      /* Keep this query (the union) in step with the two mobile layouts
-         below. */
-      @media (max-width: 560px), (max-height: 500px) and (pointer: coarse) {
+      /* Touch-only app shell: one branch for every touch-sized viewport.
+         main is pinned to the viewport (it can no longer scroll): the
+         keyboard inset is measured off main's rect, and an iOS page that
+         scrolls would otherwise read its scroll offset as keyboard motion
+         and resize the terminal under the finger. The insets are the
+         padding main used to inherit from body, which no longer applies
+         to an out-of-flow box. Scoped to hover:none (phones/tablets, not
+         touch laptops, which keep the scrolling desktop layout). The
+         width/height blocks below only retune padding and floors, so a
+         keyboard open -- which only ever shrinks the height -- can never
+         flip the page between static and fixed mid-session (the Android
+         top-edge jump: 32px of body padding becoming a fixed 10px top).
+         Width and pointer are the only inputs here the keyboard cannot
+         change, so nothing switches while it is opening. Keep the three
+         blocks in step; launcher.js mirrors the shell query (see
+         usesFixedShell). */
+      @media (pointer: coarse) and (hover: none) {
         body {
           /* Pull-to-refresh needs a scroll range, and browsers drop it on
              a page with nothing to scroll (keyboard-lab blue24): one pixel
@@ -325,21 +339,11 @@
         }
         main {
           --pad-x: 10px;
-          /* Pinned to the viewport (it can no longer scroll): the
-             keyboard inset is measured off main's rect, and an iOS page
-             that scrolls would otherwise read its scroll offset as
-             keyboard motion and resize the terminal under the finger.
-             The insets are the padding main used to inherit from body,
-             which no longer applies to an out-of-flow box. */
+          --pad-y: 16px;
           position: fixed;
           top: var(--pad-y);
           right: var(--pad-x);
           left: var(--pad-x);
-        }
-      }
-      @media (max-width: 560px) {
-        main {
-          --pad-y: 16px;
           /* Fixed window onto the transcript, scrolling internally: svh
              less the chrome and the keyboard inset launcher.js measures
              so the prompt rides above the keyboard. With resizes-content
@@ -353,6 +357,8 @@
           /* Breathing room over the keyboard, none while it is closed. */
           padding-bottom: min(16px, var(--keyboard-inset, 0px));
         }
+      }
+      @media (pointer: coarse) and (hover: none) and (max-width: 560px) {
         #subtitle {
           font-size: 11px;
         }
@@ -377,16 +383,12 @@
           opacity: 0;
         }
       }
-      @media (max-height: 500px) and (pointer: coarse) {
+      @media (pointer: coarse) and (hover: none) and (max-height: 500px) {
         main {
           --pad-y: 10px;
-          /* Short landscape: identical to portrait's main above; the
-             smaller chrome comes from --pad-y in this block. */
-          display: flex;
-          flex-direction: column;
-          height: calc(
-            100svh - var(--pad-y) * 2 - var(--keyboard-inset, 0px)
-          );
+          /* Short landscape: the shell above already sizes main off svh;
+             only the chrome shrinks here (and the height follows through
+             var(--pad-y) on its own). Breathing room scales down with it. */
           padding-bottom: min(8px, var(--keyboard-inset, 0px));
         }
         #terminal-container {

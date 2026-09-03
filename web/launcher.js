@@ -161,6 +161,12 @@ function cancelOutputRender() {
  */
 const keyboardViewport = window.visualViewport ?? window;
 const usesMobilePointer = window.matchMedia("(pointer: coarse)");
+// Fixed-shell touch layout (mirrors the CSS shell in index.html -- keep in
+// step): coarse pointer with no hover, i.e. phones/tablets but not touch
+// laptops, which keep the scrolling desktop layout.
+const usesFixedShell = window.matchMedia(
+  "(pointer: coarse) and (hover: none)",
+);
 let keyboardClosedViewportHeight =
   keyboardViewport.height ?? window.innerHeight;
 
@@ -622,11 +628,22 @@ function armGate() {
 }
 
 // Residual page scroll (the one-pixel pull-to-refresh token spent
-// northward, or momentum that chained): reset it once things are quiet,
-// so the pan slack is never left holding the page. Never while a finger
-// is down, never mid-transition -- that fight was blue17's oscillation.
+// northward, a focus nudge Chrome applies when the keyboard opens on
+// Android, or momentum that chained): reset it once things are quiet, so
+// the slack is never left holding the page -- on Android that leftover
+// offset is what shifts the fixed column (and can hide the toolbar) when
+// the keyboard opens. iOS is covered via the armed gate; Android never
+// arms it (resize mode), so the fixed-shell layout gates instead. Desktop
+// and touch laptops keep a real scroll range and are excluded. Never while
+// a finger is down, never mid-transition -- that fight was blue17's
+// oscillation.
 function pinScroll() {
-  if (!gateArmed || gateTouching || window.scrollY <= 0) return;
+  if (
+    (!gateArmed && !usesFixedShell.matches) ||
+    gateTouching ||
+    window.scrollY <= 0
+  )
+    return;
   if (performance.now() < busyUntil + 260) return;
   window.scrollTo(0, 0);
 }

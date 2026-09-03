@@ -32,9 +32,9 @@ import { findChrome, startChromeE2E, waitUntil } from "./chrome-e2e.mjs";
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const port = Number(process.argv[2]) || 8903;
 
-// Mirrors the main padding-bottom (min(Npx, keyboard-inset)) of the
-// portrait block in web/index.html -- the device emulated below is
-// portrait, so that is the rule under test. Keep in step with the CSS.
+// Mirrors the main padding-bottom (min(Npx, keyboard-inset)) of the touch
+// shell in web/index.html -- the device emulated below is portrait, so
+// N is 16 (the short-landscape block uses 8). Keep in step with the CSS.
 const BREATHING_ROOM_PX = 16;
 
 const CHROME = findChrome();
