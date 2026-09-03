@@ -318,15 +318,14 @@
          and resize the terminal under the finger. The insets are the
          padding main used to inherit from body, which no longer applies
          to an out-of-flow box. Scoped to hover:none (phones/tablets, not
-         touch laptops, which keep the scrolling desktop layout). The
-         width/height blocks below only retune padding and floors, so a
-         keyboard open -- which only ever shrinks the height -- can never
-         flip the page between static and fixed mid-session (the Android
-         top-edge jump: 32px of body padding becoming a fixed 10px top).
-         Width and pointer are the only inputs here the keyboard cannot
-         change, so nothing switches while it is opening. Keep the three
-         blocks in step; launcher.js mirrors the shell query (see
-         usesFixedShell). */
+         touch laptops, which keep the scrolling desktop layout).
+         Below, only width may vary -- never height. A height query is
+         re-evaluated against the very viewport the keyboard just shrank,
+         so the old (max-height: 500px) block flipped true mid-open and
+         moved main's top from 16px to 10px: the Android top-edge tick.
+         Width, pointer and hover are the only inputs a soft keyboard
+         cannot change, so nothing switches while it is opening.
+         launcher.js mirrors the shell query (see usesFixedShell). */
       @media (pointer: coarse) and (hover: none) {
         body {
           /* Pull-to-refresh needs a scroll range, and browsers drop it on
@@ -339,7 +338,10 @@
         }
         main {
           --pad-x: 10px;
-          --pad-y: 16px;
+          /* Compact chrome. Every touch screen wider than a phone in
+             portrait is the landscape / big-keyboard case, where height --
+             not width -- is the scarce dimension. */
+          --pad-y: 10px;
           position: fixed;
           top: var(--pad-y);
           right: var(--pad-x);
@@ -355,43 +357,12 @@
             100svh - var(--pad-y) * 2 - var(--keyboard-inset, 0px)
           );
           /* Breathing room over the keyboard, none while it is closed. */
-          padding-bottom: min(16px, var(--keyboard-inset, 0px));
-        }
-      }
-      @media (pointer: coarse) and (hover: none) and (max-width: 560px) {
-        #subtitle {
-          font-size: 11px;
-        }
-        #terminal-container {
-          /* Fills the bounded main column; the 160 px floor keeps the
-             terminal usable in the unlikely case the keyboard inset plus
-             chrome would otherwise push it to (near) zero. */
-          flex: 1 1 0;
-          min-height: 160px;
-        }
-        #screen {
-          font-size: 14px;
-          padding: 18px;
-        }
-        #terminal-input {
-          /* Stays pinned to the container's TOP edge like on desktop (the
-             base rule): the caret is then always visible and WebKit runs
-             no reveal pan on focus -- the root-cause fix for the whole
-             page being dragged north when the keyboard opens (blue17's
-             failure, blue24's fix). The echoed line in the transcript is
-             the visible prompt; the field itself stays invisible. */
-          opacity: 0;
-        }
-      }
-      @media (pointer: coarse) and (hover: none) and (max-height: 500px) {
-        main {
-          --pad-y: 10px;
-          /* Short landscape: the shell above already sizes main off svh;
-             only the chrome shrinks here (and the height follows through
-             var(--pad-y) on its own). Breathing room scales down with it. */
           padding-bottom: min(8px, var(--keyboard-inset, 0px));
         }
         #terminal-container {
+          /* Fills the bounded main column. The floor keeps the transcript
+             readable rather than collapsing it, and stays low enough that
+             a short landscape screen plus keyboard does not overflow. */
           flex: 1 1 0;
           min-height: 120px;
         }
@@ -403,6 +374,25 @@
              failure, blue24's fix). The echoed line in the transcript is
              the visible prompt; the field itself stays invisible. */
           opacity: 0;
+        }
+      }
+      /* A phone in portrait has height to spare, so it gets the roomier
+         chrome and the taller floor. Width is the discriminator because
+         height is exactly what the keyboard takes away. */
+      @media (pointer: coarse) and (hover: none) and (max-width: 560px) {
+        main {
+          --pad-y: 16px;
+          padding-bottom: min(16px, var(--keyboard-inset, 0px));
+        }
+        #terminal-container {
+          min-height: 160px;
+        }
+        #subtitle {
+          font-size: 11px;
+        }
+        #screen {
+          font-size: 14px;
+          padding: 18px;
         }
       }
     </style>

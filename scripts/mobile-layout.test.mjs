@@ -511,8 +511,9 @@ test(
 // rehearses exactly that on a live document: shrink the emulated viewport
 // (what resizes-content does on Android when the keyboard opens) and
 // require main's top edge to stay put -- the "same padding open or closed"
-// contract. Both ends stay clear of the 500px short-landscape retune,
-// which intentionally changes the chrome.
+// contract. The geometries deliberately cross the old 500px line: any
+// height-keyed rule would flip true mid-open and move main's top with it,
+// which is the jump this test guards against.
 test(
   "touch shell keeps the same top padding across viewport heights",
   { skip: skipReason, timeout: 120_000 },
@@ -537,9 +538,14 @@ test(
           padY: cs.getPropertyValue('--pad-y').trim(),
         };
       })()`;
+      // The case that matters is the one that CROSSES the 500px mark: any
+      // height-keyed rule flips true mid-open and main's top moves with
+      // it. Geometries that stay on one side of the threshold never
+      // exercised that, which is why the jump shipped.
       const geometries = [
         { name: "phone portrait", width: 390, tall: 844, short: 600 },
-        { name: "big portrait", width: 800, tall: 1280, short: 800 },
+        { name: "huge phone, tall keyboard", width: 412, tall: 915, short: 495 },
+        { name: "tablet landscape", width: 1280, tall: 800, short: 400 },
       ];
       for (const g of geometries) {
         await e2e.send("Emulation.setDeviceMetricsOverride", {
