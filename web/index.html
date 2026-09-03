@@ -241,15 +241,18 @@
         stroke-width: 1;
         vertical-align: baseline;
       }
-      /* Both controls are the same fixed-height box with the label centered
-         by line-height: no flex, because iOS Safari does not stretch a
-         flex-item <button>, and the shared box geometry keeps the two
-         controls' heights equal by construction. */
+      /* Both controls share this box: the label centered by line-height,
+          no flex, because iOS Safari does not stretch a flex-item
+          <button>. The FLOOR (not a fixed height) keeps single labels at
+          32px but lets the border grow with the text where a narrow
+          screen wraps a label onto a second line -- with a fixed height
+          the box stayed at its 32px border while lines two and beyond
+          spilled out of it. */
       .terminal-actions a,
       .terminal-actions button {
         box-sizing: border-box;
-        height: 32px;
         line-height: 30px;
+        min-height: 32px;
         padding: 0 20px;
         text-align: center;
       }
