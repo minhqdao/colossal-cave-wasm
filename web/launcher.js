@@ -1033,12 +1033,22 @@ let sharedBuffer;
 let sharedKeys;
 const isolationReloadKey = "adventure-isolation-reload";
 
-// The coi service worker performs its own reloads: the first-visit reload
-// once it controls the page, and a degrade reload when COEP credentialless
-// fails. This helper covers only the gap coi leaves on a fresh first
-// visit (worker registered but not yet controlling the page) with one
-// guarded reload; both systems guard with sessionStorage, so the page
-// reloads at most once per system per session -- never in a loop.
+// Service-worker isolation can be late rather than impossible -- first
+// visits, and private tabs (iOS 17+ supports them, iOS earlier does not)
+// claim the page a beat after our check can wait. One guarded reload per
+// session is therefore the recovery for EVERY dead end below: if a fresh
+// document is isolated, it plays; if it still can't become isolated, the
+// guard is spent, the second pass answers false, and the friendly
+// message is honest. coi performs its own reloads (first-visit, COEP
+// degrade); both systems guard with sessionStorage, so the page reloads
+// at most once per system per session -- never in a loop.
+/** @returns {boolean | undefined} reloads, or reports the final verdict */
+function tryRecoveryReload() {
+  if (sessionStorage.getItem(isolationReloadKey)) return false;
+  sessionStorage.setItem(isolationReloadKey, "1");
+  window.location.reload();
+  return undefined;
+}
 async function ensureCrossOriginIsolation() {
   if (window.crossOriginIsolated) {
     sessionStorage.removeItem(isolationReloadKey);
@@ -1068,14 +1078,15 @@ async function ensureCrossOriginIsolation() {
 
   if (!navigator.serviceWorker) return false;
 
-  // serviceWorker.ready stays pending forever when no registration can
-  // exist (e.g. Safari private browsing rejects them), which would hang
-  // the launcher on LOADING...; fail fast instead.
+  // serviceWorker.ready stays pending when no registration can exist; if
+  // it never lands this waits briefly (private tabs can claim late rather
+  // than never) and then gets the one guarded reload, same as the
+  // not-yet-controlling case below.
   const ready = await Promise.race([
     navigator.serviceWorker.ready.then(() => true),
     new Promise((resolve) => setTimeout(() => resolve(false), 5_000)),
   ]);
-  if (!ready) return false;
+  if (!ready) return tryRecoveryReload();
 
   if (navigator.serviceWorker.controller) {
     // coi is serving this page and handles its own degradation. Give its
@@ -1085,18 +1096,12 @@ async function ensureCrossOriginIsolation() {
       sessionStorage.removeItem(isolationReloadKey);
       return true;
     }
-    return false;
+    return tryRecoveryReload();
   }
 
   // Registered but not controlling yet: reload once so coi's fetch
   // handler can add the isolation headers to the page itself.
-  if (!sessionStorage.getItem(isolationReloadKey)) {
-    sessionStorage.setItem(isolationReloadKey, "1");
-    window.location.reload();
-    return undefined;
-  }
-
-  return false;
+  return tryRecoveryReload();
 }
 
 async function start() {
