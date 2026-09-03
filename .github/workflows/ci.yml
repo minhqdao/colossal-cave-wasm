@@ -56,7 +56,7 @@ jobs:
           ADVENTURE_NATIVE: ./adventure
         run: node scripts/run-tests.mjs --native-only
 
-  typecheck:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

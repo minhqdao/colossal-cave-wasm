@@ -357,16 +357,25 @@ test(
       // pulls toward the transcript's top; the emulated momentum then
       // coasts on and must also stop inside the range.
       const logBefore = await e2e.evaluate(SNAPSHOT);
-      await e2e.send("Input.synthesizeScrollGesture", {
-        x: 195,
-        y: 400, // mid-terminal
-        xDistance: 0,
-        yDistance: 160, // southward: toward the top of the transcript
-        gestureSourceType: "touch",
-        speed: 800,
-      });
-      await new Promise((r) => setTimeout(r, 700)); // momentum settles
-      const logAfter = await e2e.evaluate(SNAPSHOT);
+      // Headless Chrome can silently drop the FIRST synthesized scroll
+      // gesture on a fresh gesture target (no events delivered at all),
+      // which surfaces here as a log that never moves. Retry until the
+      // log visibly moved, so a delivery flake fails the run as a flake
+      // and never masks a real driver regression.
+      let logAfter = logBefore;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        await e2e.send("Input.synthesizeScrollGesture", {
+          x: 195,
+          y: 400, // mid-terminal
+          xDistance: 0,
+          yDistance: 160, // southward: toward the top of the transcript
+          gestureSourceType: "touch",
+          speed: 800,
+        });
+        await new Promise((r) => setTimeout(r, 700)); // momentum settles
+        logAfter = await e2e.evaluate(SNAPSHOT);
+        if (logAfter.screen.scrollTop < logBefore.screen.scrollTop) break;
+      }
       assert.ok(
         logAfter.screen.scrollTop < logBefore.screen.scrollTop,
         `a drag over the transcript should drive the log (before=${logBefore.screen.scrollTop}, after=${logAfter.screen.scrollTop})`,
