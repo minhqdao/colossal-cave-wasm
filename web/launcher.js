@@ -1046,8 +1046,23 @@ async function ensureCrossOriginIsolation() {
   }
 
   if (typeof SharedArrayBuffer === "undefined") {
+    // An app's built-in browser (Instagram, TikTok, ...) -- on iOS always
+    // a WKWebView, which cannot run the game's engine no matter what the
+    // page asks for. The only helpful message is the one-action fix.
+    const ua = navigator.userAgent;
+    const mobile =
+      /iP(hone|ad|od)/.test(ua) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) ||
+      /Android/.test(ua);
+    const iosDevice =
+      /iP(hone|ad|od)/.test(ua) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
     throw new Error(
-      "This browser does not support SharedArrayBuffer, which the game needs to handle input.",
+      mobile
+        ? iosDevice
+          ? "The game can't run in this app's browser. Tap the ⋯ or share icon and choose “Open in Safari” to play."
+          : "The game can't run in this app's browser. Open the ⋮ menu and choose “Open in Chrome” to play."
+        : "The game needs a newer browser. Open it in the latest Chrome, Safari, Firefox, or Edge to play.",
     );
   }
 
@@ -1091,9 +1106,8 @@ async function start() {
   if (isIsolated === undefined) return;
   if (!isIsolated) {
     throw new Error(
-      "The game could not start: cross-origin isolation is unavailable " +
-        "(this happens in private browsing or when service workers are " +
-        "blocked). Try a regular tab, or reload the page.",
+      "The game couldn't load. This usually means you're in a " +
+        "private tab — reopen the link in a normal tab, or try reloading.",
     );
   }
 
