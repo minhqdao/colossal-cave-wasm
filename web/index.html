@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
+<html lang="en" data-page-node-id="fnINPIm97gnI9OnUiZkOXu">
+  <head data-page-node-id="lrGW5reTkepK1cJb3twpdn">
+    <meta charset="UTF-8" data-page-node-id="mEXRHZIfSdvPc9aPSrN680" />
     <meta
       name="description"
-      content="Colossal Cave Adventure (1976) running in the browser as a FORTRAN-to-WebAssembly build, driven by a terminal-based game launcher."
+      content="Colossal Cave Adventure (1976) running in the browser as a FORTRAN-to-WebAssembly build, driven by a terminal-based game launcher." data-page-node-id="GBPKkYcPtTI5BKOsBcgcro"
     />
     <!--
       interactive-widget=resizes-content (Chrome desktop and Android, and
@@ -23,10 +23,10 @@
     -->
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1, interactive-widget=resizes-content"
+      content="width=device-width, initial-scale=1, interactive-widget=resizes-content" data-page-node-id="cYlWDpG7f9LcXrGfa3Rv0Z"
     />
-    <meta name="color-scheme" content="dark" />
-    <meta name="theme-color" content="#0b0c0b" />
+    <meta name="color-scheme" content="dark" data-page-node-id="6ihOjVcqLJ5LKBp5Oggpn3" />
+    <meta name="theme-color" content="#0b0c0b" data-page-node-id="c9GX96JeWqeFzrBLE0K5Js" />
     <title>Colossal Cave Adventure (1976)</title>
     <!--
       Retro pixel-art brass lantern (the iconic lamp from the game) in the
@@ -36,15 +36,15 @@
       size-tagged PNGs are fallbacks so every browser shows an icon
       regardless of SVG support.
     -->
-    <link rel="icon" href="./favicon.ico" sizes="32x32" />
-    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
-    <link rel="icon" type="image/png" href="./favicon-16.png" sizes="16x16" />
-    <link rel="icon" type="image/png" href="./favicon-32.png" sizes="32x32" />
-    <link rel="icon" type="image/png" href="./favicon-64.png" sizes="64x64" />
+    <link rel="icon" href="./favicon.ico" sizes="32x32" data-page-node-id="ckkW5RqOGYeyQ0DlOA4FNG" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" data-page-node-id="ZqXFmhb3u4AalxkANTbdEF" />
+    <link rel="icon" type="image/png" href="./favicon-16.png" sizes="16x16" data-page-node-id="BU5Fjjxh8gmTl9L34gNZ6O" />
+    <link rel="icon" type="image/png" href="./favicon-32.png" sizes="32x32" data-page-node-id="G9DOMcj7MFLp28XAh5wfen" />
+    <link rel="icon" type="image/png" href="./favicon-64.png" sizes="64x64" data-page-node-id="KrdiGOQy49PIS0rnS9l92C" />
     <link
       rel="apple-touch-icon"
       href="./apple-touch-icon.png"
-      sizes="180x180"
+      sizes="180x180" data-page-node-id="7rFM4gLpnUuCG6DGnIKHI7"
     />
     <!--
       The launcher uses SharedArrayBuffer to stream keyboard input into a Web
@@ -91,6 +91,7 @@
         touch-action: manipulation;
       }
       main {
+        container-type: inline-size; /* the terminal's height cap reads 100cqw */
         margin: 0 auto;
         max-width: 800px;
       }
@@ -134,6 +135,11 @@
           0 0 70px rgba(0, 0, 0, 0.65),
           0 0 0 1px rgba(255, 255, 255, 0.05);
         height: min(600px, calc(100vh - 200px));
+        /* 3:4 portrait, so a super-tall phone gets a box that still reads
+           as a screen instead of a skinny column. 100cqw is main's content
+           width -- the terminal's own. It is a ceiling on the flex/height
+           rules above, so it only binds where there is height to spare. */
+        max-height: calc(100cqw * 4 / 3);
         min-height: 360px;
         overflow: hidden;
         position: relative;
@@ -308,9 +314,14 @@
           opacity: 0;
         }
       }
-      /* Keep this query (the union) in step with the two mobile layouts
-         below. */
-      @media (max-width: 560px), (max-height: 500px) and (pointer: coarse) {
+      /* One branch for every touch-sized viewport. The old second query
+         was (max-height: 500px) -- a height the soft keyboard itself
+         changes, because interactive-widget=resizes-content shrinks the
+         layout viewport: it flipped mid-open and moved the whole page
+         (32 px of body padding becoming a fixed 10 px top). Width and
+         pointer are the only inputs here the keyboard cannot change, so
+         nothing switches while it is opening. */
+      @media (max-width: 560px), (pointer: coarse) {
         body {
           /* Pull-to-refresh needs a scroll range, and browsers drop it on
              a page with nothing to scroll (keyboard-lab blue24): one pixel
@@ -322,6 +333,7 @@
         }
         main {
           --pad-x: 10px;
+          --pad-y: 16px;
           /* Pinned to the viewport (it can no longer scroll): the
              keyboard inset is measured off main's rect, and an iOS page
              that scrolls would otherwise read its scroll offset as
@@ -332,11 +344,6 @@
           top: var(--pad-y);
           right: var(--pad-x);
           left: var(--pad-x);
-        }
-      }
-      @media (max-width: 560px) {
-        main {
-          --pad-y: 16px;
           /* Fixed window onto the transcript, scrolling internally: svh
              less the chrome and the keyboard inset launcher.js measures
              so the prompt rides above the keyboard. With resizes-content
@@ -353,12 +360,25 @@
         #subtitle {
           font-size: 11px;
         }
+        #title {
+          /* Slack left by the height cap goes above the heading and below
+             the actions, so heading, transcript and controls centre as one
+             group and the heading keeps its normal distance to the
+             terminal. Auto margins are fed only after flex-grow has taken
+             what the cap allows, and collapse to 0 once the keyboard eats
+             the slack, so nothing clips. */
+          margin-top: auto;
+        }
         #terminal-container {
-          /* Fills the bounded main column; the 160 px floor keeps the
-             terminal usable in the unlikely case the keyboard inset plus
-             chrome would otherwise push it to (near) zero. */
           flex: 1 1 0;
-          min-height: 160px;
+          height: auto;
+          /* Floor keeps the terminal usable where the inset plus chrome
+             would otherwise squeeze it to nothing; 30svh lets it go lower
+             on a short landscape screen than on a phone in portrait. */
+          min-height: min(160px, 30svh);
+        }
+        .terminal-actions {
+          margin-bottom: auto;
         }
         #screen {
           font-size: 14px;
@@ -374,42 +394,16 @@
           opacity: 0;
         }
       }
-      @media (max-height: 500px) and (pointer: coarse) {
-        main {
-          --pad-y: 10px;
-          /* Short landscape: identical to portrait's main above; the
-             smaller chrome comes from --pad-y in this block. */
-          display: flex;
-          flex-direction: column;
-          height: calc(
-            100svh - var(--pad-y) * 2 - var(--keyboard-inset, 0px)
-          );
-          padding-bottom: min(8px, var(--keyboard-inset, 0px));
-        }
-        #terminal-container {
-          flex: 1 1 0;
-          min-height: 120px;
-        }
-        #terminal-input {
-          /* Stays pinned to the container's TOP edge like on desktop (the
-             base rule): the caret is then always visible and WebKit runs
-             no reveal pan on focus -- the root-cause fix for the whole
-             page being dragged north when the keyboard opens (blue17's
-             failure, blue24's fix). The echoed line in the transcript is
-             the visible prompt; the field itself stays invisible. */
-          opacity: 0;
-        }
-      }
     </style>
   </head>
-  <body>
-    <main>
-      <h1 id="title">Colossal Cave Adventure (Fortran IV)</h1>
-      <p id="subtitle">WebAssembly build using LFortran + Emscripten</p>
-      <p id="status" hidden role="status" aria-atomic="true"></p>
-      <div id="terminal-container">
-        <h2 id="terminal-title" class="visually-hidden">Game terminal</h2>
-        <p id="terminal-instructions" class="visually-hidden">
+  <body data-page-node-id="2xZmHfCZymlcdNWeXPT1A2">
+    <main data-page-node-id="66He617UJSk41H9fhKDcSx">
+      <h1 id="title" data-page-node-id="WHDTVSKIyjjirmcW9BvvFf">Colossal Cave Adventure (Fortran IV)</h1>
+      <p id="subtitle" data-page-node-id="EQeUWlrB93B82LVmelM7Mt">WebAssembly build using LFortran + Emscripten</p>
+      <p id="status" hidden role="status" aria-atomic="true" data-page-node-id="1W2p3HHxuDOFuoShL0q6PO"></p>
+      <div id="terminal-container" data-page-node-id="qOlhlQLqgDF64rxn44Gp03">
+        <h2 id="terminal-title" class="visually-hidden" data-page-node-id="KJv2tvdTBgz7o8ZzmFPAwz">Game terminal</h2>
+        <p id="terminal-instructions" class="visually-hidden" data-page-node-id="Z7IIdmHu5Yusg35VX1EceM">
           Game output appears in this terminal. When the game asks a question,
           type your answer in the game command input and press Enter.
         </p>
@@ -418,11 +412,11 @@
           role="region"
           aria-labelledby="terminal-title"
           aria-describedby="terminal-instructions"
-          aria-live="off"
+          aria-live="off" data-page-node-id="sxpjlMeM7Lug3Z8m92VaQr"
         >
           <pre
-            id="terminal"
-          ><span id="output">LOADING...</span><span id="input"></span><span id="cursor"></span></pre>
+            id="terminal" data-page-node-id="eMZGtlPrpwJSTiCuQxg2Kc"
+          ><span id="output" data-page-node-id="9RFwQIWVR4c2FsU4rsckqK">LOADING...</span><span id="input" data-page-node-id="ewch3c9UfwcPo0wNKIJ3Mp"></span><span id="cursor" data-page-node-id="1sEoeKGbkw8ejIujArkuHn"></span></pre>
           <input
             id="terminal-input"
             type="text"
@@ -432,26 +426,26 @@
             autocapitalize="characters"
             spellcheck="false"
             aria-label="Game command input"
-            aria-describedby="terminal-instructions"
+            aria-describedby="terminal-instructions" data-page-node-id="YTudQoeavUa5vuHp8FDgii"
           />
         </div>
       </div>
-      <div class="terminal-actions">
-        <button id="restart-game" type="button">Restart game</button>
+      <div class="terminal-actions" data-page-node-id="sFsFprJgTRN5bPE2GQtV8p">
+        <button id="restart-game" type="button" data-page-node-id="AlrDHLWw8dMvOvNqLcQBhM">Restart game</button>
         <a
           id="github-link"
           href="https://github.com/minhqdao/colossal-cave-wasm"
           target="_blank"
-          rel="noopener noreferrer"
+          rel="noopener noreferrer" data-page-node-id="tYDWJcS52GCLSgBSJjAQyT"
         >
           Source<svg
             aria-hidden="true"
             width="8"
             height="8"
             viewBox="0 0 8 8"
-            focusable="false"
+            focusable="false" data-page-node-id="4jijZT1MhnXDSartKPhndD"
           >
-            <path d="M0.5 7.5 L7 1 M7 1 H3 M7 1 V5" />
+            <path d="M0.5 7.5 L7 1 M7 1 H3 M7 1 V5" data-page-node-id="SApPC9PCwrw9miGl0tWrtH" />
           </svg>
         </a>
       </div>

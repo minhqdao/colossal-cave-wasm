@@ -37,6 +37,18 @@ const port = Number(process.argv[2]) || 8903;
 // portrait, so that is the rule under test. Keep in step with the CSS.
 const BREATHING_ROOM_PX = 16;
 
+// Geometries whose keyboard-open height used to cross the 500 px layout
+// branch, plus a tall one that only exercises the height cap. The keyboard
+// heights are what a soft keyboard takes out of each viewport.
+const BRANCH_GEOMETRIES = [
+  { name: "phone portrait", width: 390, height: 844, keyboard: 320 },
+  { name: "tall phone portrait", width: 512, height: 1140, keyboard: 420 },
+  { name: "phone landscape", width: 915, height: 412, keyboard: 300 },
+  { name: "wide landscape phone", width: 1000, height: 512, keyboard: 300 },
+  { name: "foldable portrait", width: 700, height: 900, keyboard: 400 },
+  { name: "tablet landscape", width: 1280, height: 800, keyboard: 400 },
+];
+
 const CHROME = findChrome();
 const skipReason = CHROME
   ? existsSync(join(repoRoot, "web", "index.html"))
@@ -84,6 +96,27 @@ const SNAPSHOT = `(() => {
     promptInView: input.getBoundingClientRect().bottom <= visibleBottom + 1,
     actionsGap: Math.round((visibleBottom - document.querySelector('.terminal-actions').getBoundingClientRect().bottom)*100)/100,
     waiting: window.adventureDebug ? window.adventureDebug.state.waitingForInput : null,
+  };
+})()`;
+
+// The layout branch's own invariants: which branch is live (read off the
+// computed custom properties rather than the query, so a regression in the
+// query text still shows), where main's top edge sits, and the terminal's
+// shape. Kept small because this test drives real viewport resizes and
+// reads it once per state.
+const BRANCH_PROBE = `(() => {
+  const main = document.querySelector('main');
+  const container = document.getElementById('terminal-container');
+  const cs = getComputedStyle(main);
+  const r = (el) => { const b = el.getBoundingClientRect(); return { top: Math.round(b.top*100)/100, width: Math.round(b.width*100)/100, height: Math.round(b.height*100)/100 }; };
+  const c = r(container);
+  return {
+    padY: cs.getPropertyValue('--pad-y').trim(),
+    position: cs.position,
+    mainTop: r(main).top,
+    terminalWidth: c.width,
+    terminalHeight: c.height,
+    ratio: Math.round((c.height / c.width) * 1000) / 1000,
   };
 })()`;
 
@@ -500,6 +533,97 @@ test(
         beforeDrag.keyboardInset,
         `background drag should not change the keyboard inset (before=${beforeDrag.keyboardInset}, after=${afterDrag.keyboardInset})`,
       );
+    } finally {
+      e2e.close();
+    }
+  },
+);
+
+// A stub-free pass over the layout branch. The test above drives the
+// keyboard through a visualViewport stub, which by construction cannot
+// reproduce what Android Chrome does under interactive-widget=resizes-
+// content: resize the LAYOUT viewport, and with it every max-height media
+// query and viewport unit. Shrinking the emulated height does exactly
+// that, so that is what this pass uses -- it is the shape of the bug where
+// opening the keyboard flipped main out of a static, 32 px-padded box and
+// into a fixed 10 px one, moving the whole page under the finger.
+test(
+  "layout branch does not flip when the keyboard shrinks the viewport",
+  { skip: skipReason, timeout: 180_000 },
+  async () => {
+    const e2e = await startChromeE2E({
+      chrome: CHROME,
+      port: port + 1,
+      serve: "web",
+      debugPort: 9750 + (process.pid % 200),
+      profilePrefix: "colossal-cave-branch-profile",
+    });
+    try {
+      await e2e.send("Page.enable");
+      await e2e.send("Runtime.enable");
+
+      for (const device of BRANCH_GEOMETRIES) {
+        const setHeight = (height) =>
+          e2e.send("Emulation.setDeviceMetricsOverride", {
+            width: device.width,
+            height,
+            deviceScaleFactor: 2,
+            mobile: true,
+          });
+
+        await setHeight(device.height);
+        await e2e.send("Emulation.setTouchEmulationEnabled", {
+          enabled: true,
+          maxTouchPoints: 5,
+        });
+        await e2e.send("Page.navigate", {
+          url: `http://localhost:${port + 1}/`,
+        });
+        await new Promise((r) => setTimeout(r, 1200));
+        const closed = await e2e.evaluate(BRANCH_PROBE);
+
+        await setHeight(Math.max(120, device.height - device.keyboard));
+        await new Promise((r) => setTimeout(r, 400));
+        const open = await e2e.evaluate(BRANCH_PROBE);
+
+        // Nothing that positions main may change while the keyboard
+        // opens: same branch, same padding, same top edge.
+        assert.equal(
+          open.position,
+          closed.position,
+          `${device.name}: main's positioning must not change when the keyboard opens (${closed.position} -> ${open.position})`,
+        );
+        assert.equal(
+          open.padY,
+          closed.padY,
+          `${device.name}: --pad-y must not change when the keyboard opens (${closed.padY} -> ${open.padY})`,
+        );
+        assert.equal(
+          open.mainTop,
+          closed.mainTop,
+          `${device.name}: the top of the page must not move when the keyboard opens (${closed.mainTop} -> ${open.mainTop})`,
+        );
+
+        // The 3:4 portrait ceiling holds in both states; on a tall screen
+        // it must also actually bind, or it is dead code and the terminal
+        // is the skinny column this cap exists to prevent.
+        const cap = Math.round(((closed.terminalWidth * 4) / 3) * 100) / 100;
+        for (const [state, snap] of [
+          ["closed", closed],
+          ["open", open],
+        ]) {
+          assert.ok(
+            snap.ratio <= 4 / 3 + 0.01,
+            `${device.name} (${state}): terminal capped at 3:4, got ${snap.terminalWidth}x${snap.terminalHeight} (${snap.ratio})`,
+          );
+        }
+        if (device.height - device.width > 300) {
+          assert.ok(
+            Math.abs(closed.terminalHeight - cap) <= 2,
+            `${device.name}: the cap should bind on a tall screen (height ${closed.terminalHeight}, cap ${cap})`,
+          );
+        }
+      }
     } finally {
       e2e.close();
     }
