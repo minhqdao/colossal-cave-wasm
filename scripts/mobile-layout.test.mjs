@@ -122,6 +122,43 @@ const VIEWPORT_STUB = `
 })();
 `;
 
+/**
+ * A deterministic touch drag via explicit Input.dispatchTouchEvent.
+ * Input.synthesizeScrollGesture is unreliable in Linux headless Chrome
+ * (its events can bypass the page's touch listeners), so gestures are
+ * spelled out here: the driver only reacts to real touch events, and
+ * dispatchTouchEvent goes through the real input pipeline on every
+ * platform.
+ * @param {object} e2e the CDP client from startChromeE2E
+ * @param {{ x: number, y: number, dx?: number, dy: number, steps?: number, stepMs?: number }} opts
+ */
+async function touchDrag(e2e, { x, y, dx = 0, dy, steps = 8, stepMs = 16 }) {
+  await e2e.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x, y, id: 1, radiusX: 1, radiusY: 1, force: 1 }],
+  });
+  for (let i = 1; i <= steps; i++) {
+    await e2e.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [
+        {
+          x: x + (dx * i) / steps,
+          y: y + (dy * i) / steps,
+          id: 1,
+          radiusX: 1,
+          radiusY: 1,
+          force: 1,
+        },
+      ],
+    });
+    if (stepMs) await new Promise((r) => setTimeout(r, stepMs));
+  }
+  await e2e.send("Input.dispatchTouchEvent", {
+    type: "touchEnd",
+    touchPoints: [],
+  });
+}
+
 test(
   "mobile terminal: bounded box with internal scroll and visible prompt",
   { skip: skipReason, timeout: 120_000 },
@@ -350,6 +387,11 @@ test(
         "prompt stays visible through the two-step keyboard move",
       );
 
+      // Let the keyboard animation's slack (busyUntil) drain before the
+      // log drag: on a slower CI runner the inset glue could still be
+      // active and fight the touch driver's scrollTop writes.
+      await new Promise((r) => setTimeout(r, 500));
+
       // The transcript is a driven, non-scrolling log (blue29/30): a touch
       // drag over it must move the text via scrollTop while the page and
       // the layout stay put, and the log must never leave its range (hard
@@ -357,25 +399,9 @@ test(
       // pulls toward the transcript's top; the emulated momentum then
       // coasts on and must also stop inside the range.
       const logBefore = await e2e.evaluate(SNAPSHOT);
-      // Headless Chrome can silently drop the FIRST synthesized scroll
-      // gesture on a fresh gesture target (no events delivered at all),
-      // which surfaces here as a log that never moves. Retry until the
-      // log visibly moved, so a delivery flake fails the run as a flake
-      // and never masks a real driver regression.
-      let logAfter = logBefore;
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        await e2e.send("Input.synthesizeScrollGesture", {
-          x: 195,
-          y: 400, // mid-terminal
-          xDistance: 0,
-          yDistance: 160, // southward: toward the top of the transcript
-          gestureSourceType: "touch",
-          speed: 800,
-        });
-        await new Promise((r) => setTimeout(r, 700)); // momentum settles
-        logAfter = await e2e.evaluate(SNAPSHOT);
-        if (logAfter.screen.scrollTop < logBefore.screen.scrollTop) break;
-      }
+      await touchDrag(e2e, { x: 195, y: 400, dy: 160 }); // southward: toward the top
+      await new Promise((r) => setTimeout(r, 700)); // momentum settles
+      const logAfter = await e2e.evaluate(SNAPSHOT);
       assert.ok(
         logAfter.screen.scrollTop < logBefore.screen.scrollTop,
         `a drag over the transcript should drive the log (before=${logBefore.screen.scrollTop}, after=${logAfter.screen.scrollTop})`,
@@ -419,14 +445,7 @@ test(
       const endBefore = await e2e.evaluate(SNAPSHOT);
       const roomAtEnd = endBefore.screen.scrollHeight - endBefore.screen.clientHeight;
       assert.equal(endBefore.screen.scrollTop, roomAtEnd, "log starts at its end");
-      await e2e.send("Input.synthesizeScrollGesture", {
-        x: 195,
-        y: 400, // mid-terminal
-        xDistance: 0,
-        yDistance: -180, // northward: against the hard end
-        gestureSourceType: "touch",
-        speed: 800,
-      });
+      await touchDrag(e2e, { x: 195, y: 400, dy: -180 }); // northward: against the end
       await new Promise((r) => setTimeout(r, 700)); // momentum settles
       const endAfter = await e2e.evaluate(SNAPSHOT);
       assert.equal(
@@ -461,14 +480,7 @@ test(
       await new Promise((r) => setTimeout(r, 250));
       const beforeDrag = await e2e.evaluate(SNAPSHOT);
       // Body padding above the title: outside the terminal, on the page.
-      await e2e.send("Input.synthesizeScrollGesture", {
-        x: 195,
-        y: 8,
-        xDistance: 0,
-        yDistance: -220,
-        gestureSourceType: "touch",
-        speed: 800,
-      });
+      await touchDrag(e2e, { x: 195, y: 8, dy: -220 }); // northward on the page background
       await new Promise((r) => setTimeout(r, 300));
       const afterDrag = await e2e.evaluate(SNAPSHOT);
       // Shifting by the scroll range is the gesture doing its job (and is

@@ -72,7 +72,7 @@ jobs:
       - name: Browser smoke tests (launcher gestures + boot guard)
         run: |
           npm install --no-save --no-package-lock --prefix scripts jsdom@26
-          node --test scripts/browser-smoke.test.mjs scripts/boot-guard.test.mjs scripts/terminal-scroll.test.mjs scripts/terminal-keyboard.test.mjs scripts/terminal-log.test.mjs
+          SMOKE_NODE_MODULES="$PWD/scripts/node_modules" node --test scripts/browser-smoke.test.mjs scripts/boot-guard.test.mjs scripts/terminal-scroll.test.mjs scripts/terminal-keyboard.test.mjs scripts/terminal-log.test.mjs
 
       - name: Mobile layout (headless Chrome)
         run: node --test scripts/mobile-layout.test.mjs
