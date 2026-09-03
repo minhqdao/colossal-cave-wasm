@@ -14,6 +14,26 @@ import {
   measureKeyboardInset,
   scrollTerminalToBottom,
 } from "./terminal-scroll.js";
+import {
+  decideLogMove,
+  decideLogWheel,
+  drivenScrollTop,
+  flickVelocity,
+  momentumStep,
+} from "./terminal-log.js";
+import {
+  KEYBOARD_HEIGHT_KEY,
+  KEYBOARD_SLIDE_MS,
+  LATE_READING_FRACTION,
+  MISMATCH_PX,
+  SETTLE_EPSILON_PX,
+  decideReading,
+  detectKeyboardMode,
+  easeInOut,
+  forecastInset,
+  retargetDuration,
+  shouldBlockNorthDrag,
+} from "./terminal-keyboard.js";
 import { hasTextSelection, updateTextContent } from "./terminal-selection.js";
 import {
   createKeysBuffer,
@@ -163,49 +183,602 @@ window.addEventListener("resize", () => {
   scrollTerminalToBottom(screen);
 });
 
-// Touch-only: keep the prompt in view when the soft keyboard opens or
-// closes (and when the page pans during the keyboard animation) by
-// shrinking main so the terminal's bottom -- where the latest output and
-// the input line live -- rides just above the visible area. Desktop is
-// excluded: the var is unused outside the mobile media query and a
-// desktop window resize is already handled above.
-let currentKeyboardInset = 0;
-function updateKeyboardInset({ scrollAfterResize = false } = {}) {
-  if (!usesTouchInput() || !main) return;
-  const viewport = window.visualViewport;
-  if (!viewport) return;
-  // Sample "at the bottom" before applying the inset: shrinking the
-  // container raises the maximum scrollTop by the inset, so a reader who
-  // was pinned in the old layout would no longer read as pinned after.
-  // Someone who had scrolled up to inspect history is left where they are.
-  const wasPinned = scrollAfterResize && isPinnedToBottom(screen);
-  const inset = measureKeyboardInset(main, viewport, currentKeyboardInset);
-  if (inset !== currentKeyboardInset) {
-    currentKeyboardInset = inset;
-    main.style.setProperty("--keyboard-inset", `${inset}px`);
-  }
-  if (wasPinned) {
-    outputRenderer.schedule();
+// Touch-only: keep the prompt above the soft keyboard by shrinking main,
+// and keep it shrinking IN SYNC with the keyboard's own slide. iOS fires
+// visualViewport.resize once, with the FINAL height, at the end of the
+// slide -- never progressively -- so writing that reading straight into
+// the CSS variable held the terminal at full size for the whole slide and
+// then snapped it (the keyboard-lab blue16 failure). The driver instead
+// forecasts the final inset at focus -- the measured height from the
+// previous open, persisted so every open after the very first is exact,
+// else a fraction of the layout -- and self-animates --keyboard-inset over
+// the keyboard's own timing. The honest reading still arrives, but it only
+// ever RETARGETS the running move or finishes it with a short glide
+// (blue17/20); see terminal-keyboard.js. Android honors
+// interactive-widget=resizes-content: the layout shrinks natively, the
+// honest reading says 0, and the driver stands down. Desktop is excluded:
+// the var is unused outside the mobile media query and a desktop window
+// resize is already handled above.
+let shownInset = 0; // px of --keyboard-inset currently displayed
+let insetFrom = 0;
+let insetTo = 0;
+let animStart = 0;
+let animDur = 0;
+let animating = false;
+let busyUntil = 0; // rAF stays alive through a transition plus slack
+let insetRaf = 0;
+let keyboardFocused = false;
+// Whether the transcript was pinned to the bottom when focus started: a
+// reader parked on the newest line rides the shrink; one who scrolled up
+// into history stays there.
+let pinnedToBottom = false;
+let focusSeq = 0;
+let lastResizeSeq = 0;
+/** @type {number | undefined} */
+let noShowTimer;
+/** @type {number | undefined} */
+let settleTimer;
+let baseLayoutHeight = document.documentElement.clientHeight;
+/** @type {import("./terminal-keyboard.js").KeyboardMode} */
+let keyboardMode = "unknown";
+let storedKeyboardHeight = loadStoredKeyboardHeight();
+const iosLike =
+  /iP(hone|o(d|ad))/.test(navigator.userAgent) ||
+  (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+function loadStoredKeyboardHeight() {
+  try {
+    return Number(localStorage.getItem(KEYBOARD_HEIGHT_KEY)) || 0;
+  } catch {
+    return 0;
   }
 }
+
+/**
+ * @param {number} px
+ */
+function rememberKeyboardHeight(px) {
+  if (px <= 0.5) return;
+  storedKeyboardHeight = px;
+  try {
+    localStorage.setItem(KEYBOARD_HEIGHT_KEY, String(Math.round(px)));
+  } catch {
+    // Private modes can throw on storage access; the forecast then falls
+    // back to the layout estimate on every open, which still retargets.
+  }
+}
+
+function forgetStoredKeyboardHeight() {
+  storedKeyboardHeight = 0;
+  try {
+    localStorage.removeItem(KEYBOARD_HEIGHT_KEY);
+  } catch {
+    // Nothing to clean up when storage is unavailable.
+  }
+}
+
+let lastAppliedInset = "";
+/**
+ * @param {number} px
+ */
+function applyInset(px) {
+  if (!main) return;
+  const v = px.toFixed(1);
+  if (v === lastAppliedInset) return;
+  lastAppliedInset = v;
+  main.style.setProperty("--keyboard-inset", `${v}px`);
+}
+
+function needInsetFrame() {
+  if (!insetRaf) insetRaf = requestAnimationFrame(insetStep);
+}
+
+/**
+ * @param {number} target
+ * @param {number} duration
+ * @param {number} now
+ */
+function driveInsetTo(target, duration, now) {
+  insetFrom = shownInset;
+  insetTo = target;
+  animStart = now;
+  animDur = Math.max(40, duration);
+  animating = true;
+  busyUntil = Math.max(busyUntil, now + animDur + 220);
+  needInsetFrame();
+}
+
+/**
+ * @param {number} now rAF timestamp
+ */
+function insetStep(now) {
+  insetRaf = 0;
+  if (animating) {
+    const t = Math.min(1, (now - animStart) / animDur);
+    shownInset = insetFrom + (insetTo - insetFrom) * easeInOut(t);
+    if (t >= 1) {
+      shownInset = insetTo;
+      animating = false;
+    }
+  }
+  applyInset(shownInset);
+  // Keep the transcript glued to the terminal's bottom edge -- where the
+  // input line lives -- but ONLY while a keyboard transition window is
+  // actually running (blue30). A pull-to-refresh pan fires visualViewport
+  // scrolls and hence frames long after the keyboard settled; gluing on
+  // focus alone would slam the transcript back down mid-pull. The
+  // transcript driver below also clears pinnedToBottom the moment the
+  // user scrolls, so no later resize can yank the transcript either.
+  if (pinnedToBottom && (animating || now < busyUntil)) {
+    scrollTerminalToBottom(screen);
+  }
+  if (animating || now < busyUntil) needInsetFrame();
+}
+
+/**
+ * The honest inset reading, or null when there is nothing to act on: no
+ * viewport model (desktop), or a pinch (the zoom shrinks the visual
+ * viewport in ways the layout must not chase, and the keyboard cannot be
+ * open mid-pinch). measureKeyboardInset cancels the currently applied
+ * inset out of the geometry, so the reading stays stable while the
+ * animation runs.
+ * @returns {number | null}
+ */
+function readHonestInset() {
+  const viewport = window.visualViewport;
+  if (!viewport || !main) return null;
+  if (viewport.scale && Math.abs(viewport.scale - 1) > 0.01) return null;
+  return measureKeyboardInset(main, viewport, shownInset);
+}
+
+// Pan vs. resize is decided from the measurement, never the UA: a WebKit
+// that ever resizes the layout viewport for the keyboard turns the pan
+// machinery (the gate, the scroll pin) off by itself. A closed reading
+// only re-baselines the layout height for the next comparison.
+/**
+ * @param {number} reading
+ * @returns {import("./terminal-keyboard.js").KeyboardMode}
+ */
+function detectMode(reading) {
+  if (reading > 0.5) {
+    keyboardMode = detectKeyboardMode({
+      reading,
+      layoutHeight: document.documentElement.clientHeight,
+      baseLayoutHeight,
+    });
+    armGate();
+  } else {
+    baseLayoutHeight = document.documentElement.clientHeight;
+  }
+  return keyboardMode;
+}
+
+function onKeyboardFocus() {
+  keyboardFocused = true;
+  pinnedToBottom = isPinnedToBottom(screen);
+  // Only a focus from a released tap can raise iOS's keyboard. The game's
+  // auto-focus (and a visibility-restore) leaves it closed, so forecasting
+  // there would shrink the terminal for a keyboard that never comes; the
+  // no-show guard would undo it, but the transient shrink is still wrong.
+  const fromGesture = focusFromGesture;
+  focusFromGesture = false;
+  const reading = readHonestInset() ?? 0;
+  detectMode(reading);
+  if (keyboardMode === "resize") return; // Android: layout already shrank
+  if (!fromGesture || !iosLike) return; // desktop: no soft keyboard to match
+  rememberKeyboardHeight(reading);
+  // Forecast the final inset; the honest vv.resize reading (one burst, at
+  // slide end, on iOS) retargets this later.
+  const forecast = forecastInset({
+    measured: reading,
+    stored: storedKeyboardHeight,
+    layoutHeight: document.documentElement.clientHeight,
+  });
+  const seq = ++focusSeq;
+  driveInsetTo(forecast, KEYBOARD_SLIDE_MS, performance.now());
+  // No-show guard: if no honest reading ever arrives and the visual
+  // viewport never shrank, no soft keyboard is coming (hardware keyboard
+  // attached, iPad cursor) -- undo the forecast smoothly instead of
+  // leaving the terminal stranded small.
+  clearTimeout(noShowTimer);
+  noShowTimer = setTimeout(() => {
+    if (
+      keyboardFocused &&
+      focusSeq === seq &&
+      lastResizeSeq !== seq &&
+      (readHonestInset() ?? 0) < 1 &&
+      shownInset > 1
+    ) {
+      driveInsetTo(0, 160, performance.now());
+    }
+  }, KEYBOARD_SLIDE_MS + 800);
+}
+
+function onKeyboardBlur() {
+  keyboardFocused = false;
+  clearTimeout(noShowTimer);
+  driveInsetTo(0, KEYBOARD_SLIDE_MS, performance.now());
+}
+
+// One decision path for an honest reading, shared by the resize and scroll
+// handlers: settle with a short glide, retarget the running move, or drop
+// the reading as mid-slide noise. A reading taken at rest can only
+// correct, never contaminate, so every reading also schedules a settle
+// re-measure that catches whatever was dropped.
+/**
+ * @param {number} reading
+ */
+function applyReading(reading) {
+  const now = performance.now();
+  const settled = now > busyUntil;
+  const mismatch = Math.abs(reading - insetTo) > MISMATCH_PX;
+  const extending = keyboardFocused
+    ? reading > insetTo - 0.5
+    : reading < insetTo + 0.5;
+  const late =
+    animDur > 0 && (now - animStart) / animDur >= LATE_READING_FRACTION;
+  const decision = decideReading({
+    settled,
+    mismatch,
+    extending,
+    late,
+    focused: keyboardFocused,
+  });
+  if (decision === "settle") {
+    if (Math.abs(reading - shownInset) > SETTLE_EPSILON_PX) {
+      driveInsetTo(reading, 120, now);
+    }
+  } else if (decision === "retarget" || decision === "retarget-late") {
+    driveInsetTo(
+      reading,
+      retargetDuration({ animating, animDur, elapsed: now - animStart }),
+      now,
+    );
+  }
+  clearTimeout(settleTimer);
+  settleTimer = setTimeout(() => {
+    const honest = readHonestInset();
+    if (honest === null) return;
+    detectMode(honest);
+    if (Math.abs(honest - shownInset) > SETTLE_EPSILON_PX) {
+      driveInsetTo(honest, 120, performance.now());
+    }
+  }, 450);
+}
+
+function onKeyboardViewportResize() {
+  if (!usesTouchInput()) return;
+  lastResizeSeq = focusSeq;
+  const reading = readHonestInset();
+  if (reading === null) return; // pinch: hold
+  rememberKeyboardHeight(reading);
+  detectMode(reading);
+  if (keyboardMode === "resize") {
+    // Android/native shrink: the layout already moved, so --keyboard-inset
+    // must stay 0 or it double-subtracts.
+    animating = false;
+    shownInset = 0;
+    applyInset(0);
+    return;
+  }
+  applyReading(reading);
+}
+
+function onKeyboardViewportScroll() {
+  if (!usesTouchInput()) return;
+  // A pan moves the visible window without changing the keyboard's size.
+  // Mid-animation it is noise (the resize handler owns transitions); at
+  // rest it can only correct.
+  if (performance.now() <= busyUntil) return;
+  const reading = readHonestInset();
+  if (reading === null) return;
+  if (Math.abs(reading - shownInset) > SETTLE_EPSILON_PX) {
+    driveInsetTo(reading, 120, performance.now());
+  }
+}
+
 if (window.visualViewport) {
-  // Keyboard show/hide and orientation change both fire resize here;
-  // re-scrolling pins the prompt above the keyboard.
-  window.visualViewport.addEventListener("resize", () =>
-    updateKeyboardInset({ scrollAfterResize: true }),
-  );
-  // Panning (visualViewport scroll) does not change what is hidden --
-  // just where the visible region sits -- so only re-measure.
-  window.visualViewport.addEventListener("scroll", () =>
-    updateKeyboardInset(),
-  );
+  // Keyboard show/hide and orientation change both fire resize here; the
+  // driver keeps the prompt riding above the keyboard through either.
+  window.visualViewport.addEventListener("resize", onKeyboardViewportResize);
+  window.visualViewport.addEventListener("scroll", onKeyboardViewportScroll);
 }
 // Fallback for browsers / WebViews that miss visualViewport events.
+let lastInnerWidth = window.innerWidth;
 window.addEventListener("resize", () => {
-  if (!usesTouchInput() || !main) return;
-  updateKeyboardInset({ scrollAfterResize: true });
+  if (!usesTouchInput()) return;
+  if (innerWidth !== lastInnerWidth) {
+    // Rotation: the stored keyboard height belongs to the old geometry,
+    // and the closed-viewport ratchet to the old orientation.
+    lastInnerWidth = innerWidth;
+    forgetStoredKeyboardHeight();
+    keyboardClosedViewportHeight = 0;
+  }
+  const reading = readHonestInset();
+  if (reading === null) return;
+  detectMode(reading);
+  driveInsetTo(reading, 160, performance.now());
 });
-updateKeyboardInset();
+
+// ================= the north-drag gate (blue14/15, blue24) =================
+// WebKit never resizes the layout viewport for the keyboard (bug 259770);
+// it pans instead, and the pan range is exactly one keyboard tall. No
+// height or overflow on html/body can remove that slack; only a gesture
+// can stop a gesture. One non-passive touchmove on document
+// preventDefaults a northward drag ONLY when no inner scroller can consume
+// it. Southward, horizontal, multi-touch and open selections always pass,
+// so bounce, pull-to-refresh and the magnifier stay native. Armed only
+// where the page actually pans (measured above, not UA-sniffed), so
+// Chrome keeps its scroll fast path.
+let gateArmed = false;
+let gateTouching = false;
+let gateMulti = false;
+let gateStartY = 0;
+/** @type {Element | null} */
+let gateScroller = null;
+
+/**
+ * The nearest scrollable ancestor of `node`, or null. The transcript is
+ * the only scroller on the page, but the walk stays generic so a drag
+ * that starts on any future element is classified the same way.
+ * @param {EventTarget | null} node
+ * @returns {Element | null}
+ */
+function scrollerUnder(node) {
+  for (
+    let n = /** @type {Element | null} */ (node);
+    n && n !== document.body && n !== document.documentElement;
+    n = n.parentElement
+  ) {
+    const overflowY = getComputedStyle(n).overflowY;
+    if (overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay") {
+      return n;
+    }
+  }
+  return null;
+}
+
+/**
+ * Flatten a scroller to the plain numbers the gate decision consumes.
+ * @param {Element} el
+ */
+function describeScroller(el) {
+  const editable = el.tagName === "TEXTAREA" || el.tagName === "INPUT";
+  return {
+    scrollTop: el.scrollTop,
+    scrollHeight: el.scrollHeight,
+    clientHeight: el.clientHeight,
+    editable,
+    value: editable ? /** @type {HTMLInputElement} */ (el).value : "",
+  };
+}
+
+/** @param {TouchEvent} event */
+function onGateStart(event) {
+  gateTouching = true;
+  gateMulti = event.touches.length !== 1;
+  if (gateMulti) return;
+  gateStartY = event.touches[0].clientY;
+  gateScroller = scrollerUnder(event.target);
+  // The transcript is a JS-driven scroller (overflow hidden), invisible
+  // to the overflow walk above -- but the gate's room check must still
+  // see it, or every northward drag over the transcript would be treated
+  // as a page pan to block (blue29).
+  const target = /** @type {Node | null} */ (event.target);
+  if (!gateScroller && target && screen.contains(target)) gateScroller = screen;
+}
+
+/** @param {TouchEvent} event */
+function onGateMove(event) {
+  if (gateMulti || event.touches.length !== 1) return;
+  const selection = window.getSelection();
+  if (
+    document.activeElement === terminalInput &&
+    terminalInput.selectionStart !== terminalInput.selectionEnd
+  ) {
+    return; // a selection drag inside the field stays native
+  }
+  if (
+    shouldBlockNorthDrag({
+      deltaY: event.touches[0].clientY - gateStartY,
+      multiTouch: false,
+      selectionCollapsed: !selection || selection.isCollapsed,
+      scroller: gateScroller && describeScroller(gateScroller),
+    })
+  ) {
+    event.preventDefault(); // no chaining, no page pan
+  }
+}
+
+function onGateEnd() {
+  gateTouching = false;
+  gateMulti = false;
+  gateScroller = null;
+  // Momentum out of a scroller outlives the finger; if it chained north
+  // anyway, the scroll pin cleans up once it is spent.
+  setTimeout(pinScroll, 150);
+}
+
+function armGate() {
+  if (gateArmed || keyboardMode !== "pan") return;
+  gateArmed = true;
+  document.addEventListener("touchstart", onGateStart, { passive: true });
+  document.addEventListener("touchmove", onGateMove, { passive: false });
+  document.addEventListener("touchend", onGateEnd, { passive: true });
+  document.addEventListener("touchcancel", onGateEnd, { passive: true });
+}
+
+// Residual page scroll (the one-pixel pull-to-refresh token spent
+// northward, or momentum that chained): reset it once things are quiet,
+// so the pan slack is never left holding the page. Never while a finger
+// is down, never mid-transition -- that fight was blue17's oscillation.
+function pinScroll() {
+  if (!gateArmed || gateTouching || window.scrollY <= 0) return;
+  if (performance.now() < busyUntil + 260) return;
+  window.scrollTo(0, 0);
+}
+window.addEventListener("scroll", pinScroll, { passive: true });
+
+// ================= the transcript driver (blue29/30) =================
+// The transcript is NOT a native scroller: #screen is overflow:hidden, so
+// it cannot rubber-band, cannot chain, and has no overscroll physics of
+// any kind -- no matter where a gesture starts (WebKit decides a gesture's
+// overscroll up front, so overscroll-behavior could not cover a drag that
+// ARRIVES at an edge mid-gesture; blue26-28 shipped the evidence). All log
+// movement is driven here, clamped and pixel-rounded on every write: the
+// ends are hard BY CONSTRUCTION. Momentum after a flick is emulated
+// (native momentum needs a scroller; this has none).
+//
+// A southward drag that finds the log at its top is nobody's scroll: the
+// driver never preventDefaults those moves, so the document -- sitting at
+// scroll 0 -- runs the browser's OWN pull-to-refresh, keyboard open or
+// closed. A pull that arrives at the top mid-gesture keeps driving the
+// hard 0 through a small dead zone, then hands the gesture to the page
+// and LATCHES the hand-off: no re-driving that gesture, so the page pull
+// can never fight the log again. On iOS, which locks a touch to its first
+// scroll owner, such a pull stops dead -- abruptly, with no stretch; the
+// next touch from the top is a full native pull. That abrupt stop is the
+// accepted worst case.
+let logTouch = false;
+let logY0 = 0;
+let logTop0 = 0;
+let logDriven = false; // this gesture drove the log (a flick is possible)
+let logHandOff = false; // top arrival latched: the page owns the gesture
+let logMomentumRaf = 0;
+let logVelocity = 0;
+let logMomentumT0 = 0;
+/** @type {Array<{ t: number, st: number }>} */
+const logSamples = [];
+
+function logRoom() {
+  return screen.scrollHeight - screen.clientHeight;
+}
+
+function logStopMomentum() {
+  if (logMomentumRaf) cancelAnimationFrame(logMomentumRaf);
+  logMomentumRaf = 0;
+  logVelocity = 0;
+}
+
+/**
+ * @param {number} now rAF timestamp
+ */
+function logMomentumStep(now) {
+  logMomentumRaf = 0;
+  const step = momentumStep({
+    scrollTop: screen.scrollTop,
+    velocity: logVelocity,
+    dtMs: now - logMomentumT0,
+    room: logRoom(),
+  });
+  logMomentumT0 = now;
+  logVelocity = step.velocity;
+  screen.scrollTop = step.scrollTop;
+  if (step.running) logMomentumRaf = requestAnimationFrame(logMomentumStep);
+}
+
+function logRelease() {
+  const velocity = flickVelocity(logSamples);
+  if (velocity === 0) return;
+  logVelocity = velocity;
+  logMomentumT0 = performance.now();
+  logMomentumRaf = requestAnimationFrame(logMomentumStep);
+}
+
+function logGestureEnd() {
+  if (logTouch && logDriven && !logHandOff) logRelease();
+  logTouch = false;
+  logDriven = false;
+  logHandOff = false;
+  logSamples.length = 0;
+}
+
+screen.addEventListener(
+  "touchstart",
+  (e) => {
+    logStopMomentum();
+    logTouch = e.touches.length === 1;
+    if (!logTouch) return;
+    logY0 = e.touches[0].clientY;
+    logTop0 = Math.round(screen.scrollTop);
+    logDriven = false;
+    logHandOff = false;
+    logSamples.length = 0;
+  },
+  { passive: true },
+);
+
+screen.addEventListener(
+  "touchmove",
+  (e) => {
+    if (e.touches.length !== 1) {
+      // Pinch or a second finger: hands off; the page can have it.
+      logTouch = false;
+      logDriven = false;
+      logHandOff = false;
+      logStopMomentum();
+      return;
+    }
+    if (!logTouch) return;
+    const dy = e.touches[0].clientY - logY0;
+    const selection = window.getSelection();
+    const room = logRoom();
+    const move = decideLogMove({
+      dy,
+      top0: logTop0,
+      room,
+      handOff: logHandOff,
+      selectionCollapsed: !selection || selection.isCollapsed,
+    });
+    if (move.action === "page") return;
+    e.preventDefault(); // the log consumes this move; the page must not
+    if (move.action === "top") {
+      screen.scrollTop = 0;
+      pinnedToBottom = false; // the user scrolled: release the keyboard glue
+      if (move.latch) logHandOff = true;
+      return;
+    }
+    const target = drivenScrollTop({ top0: logTop0, dy, room });
+    logDriven = true;
+    pinnedToBottom = false; // the user scrolled: release the keyboard glue
+    screen.scrollTop = target;
+    logSamples.push({ t: performance.now(), st: target });
+    if (logSamples.length > 4) logSamples.shift();
+  },
+  { passive: false },
+);
+
+screen.addEventListener("touchend", logGestureEnd, { passive: true });
+screen.addEventListener("touchcancel", logGestureEnd, { passive: true });
+
+// Desktop: wheel drives the same clamped path, and CHAINS the surplus to
+// the outer page once the log is spent (keyboard-lab blue31): while the
+// delta fits inside the log it is consumed here (preventDefault, log
+// scrolls, page stays); once the delta would overshoot past an end, the
+// log is clamped to the edge and the wheel event is NOT prevented -- the
+// browser scrolls the outer page natively with the surplus, the same
+// contract as the touch hand-off at the top on iOS. No scrollBy inside
+// the handler: on Safari, programmatic page scroll during active wheel
+// momentum fights the scrolling thread and the page wiggles. Line/page
+// delta modes are converted to pixels (decideLogWheel).
+screen.addEventListener(
+  "wheel",
+  (e) => {
+    const room = logRoom();
+    if (room <= 1) return; // short log: the wheel belongs to the page
+    const move = decideLogWheel({
+      deltaY: e.deltaY,
+      deltaMode: e.deltaMode,
+      scrollTop: screen.scrollTop,
+      room,
+      pageHeight: window.innerHeight,
+    });
+    pinnedToBottom = false; // the user scrolled: release the keyboard glue
+    screen.scrollTop = move.scrollTop;
+    if (move.prevent) e.preventDefault(); // the log consumed it all
+  },
+  { passive: false },
+);
 
 terminalInput.addEventListener("focus", () => {
   render();
@@ -215,8 +788,10 @@ terminalInput.addEventListener("focus", () => {
     keyboardClosedViewportHeight,
     keyboardViewport.height ?? window.innerHeight,
   );
+  onKeyboardFocus();
 });
 terminalInput.addEventListener("blur", () => {
+  onKeyboardBlur();
   // Clicking terminal text briefly transfers focus so the browser can retain
   // native text selection. Keep the existing cursor animation running until
   // the click determines whether this was a tap/click or a selection drag.
@@ -305,6 +880,10 @@ function submitInput() {
   }, inputResponseTimeoutMs);
 }
 
+// True for the focus() calls that can raise a soft keyboard on iOS: the
+// ones made inside a released tap. The driver forecasts only for these.
+let focusFromGesture = false;
+
 function focusTerminalInput({ force = false } = {}) {
   if (!waitingForInput) return;
   if (document.activeElement === terminalInput) {
@@ -313,7 +892,10 @@ function focusTerminalInput({ force = false } = {}) {
     // gesture) blur first: the following focus() is an activation again
     // and iOS opens the keyboard.
     if (!force || !needsSoftKeyboardFocus()) return;
+    focusFromGesture = true;
     terminalInput.blur();
+  } else if (force) {
+    focusFromGesture = true;
   }
   // preventScroll: focusing must never yank the viewport around; opening the
   // keyboard itself may, which is Safari's own behavior and left alone.
@@ -402,6 +984,14 @@ terminalInput.addEventListener("input", (event) => {
     submitInput();
     return;
   }
+
+  // iOS Smart Punctuation substitutes curly quotes even with autocorrect
+  // off; map them back before the ASCII filter so the native value, the
+  // echoed line and the submitted text agree (keyboard-lab blue24).
+  const unsmart = terminalInput.value
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"');
+  if (unsmart !== terminalInput.value) terminalInput.value = unsmart;
 
   // The input buffer stores one byte per character; drop anything outside
   // printable ASCII (IME/CJK/pasted Unicode would otherwise wrap into wrong

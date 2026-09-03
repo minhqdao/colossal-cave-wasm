@@ -319,6 +319,128 @@ test(
         `keyboard closing should restore the buttons' gap (before=${before.actionsGap}, after=${after.actionsGap})`,
       );
 
+      // The inset is DRIVEN, not snapped: two staggered readings rehearse
+      // the driver's decision paths (an interim reading that extends the
+      // move, then the honest one that arrives mid-animation and is either
+      // retargeted onto or dropped and corrected by the settle re-measure).
+      // Either way the displayed inset must converge on the honest value
+      // and never run past the interim reading's own target.
+      await e2e.evaluate("window.visualViewport.__setHeight(300)");
+      await new Promise((r) => setTimeout(r, 60));
+      await e2e.evaluate("window.visualViewport.__setHeight(544)");
+      let converged = false;
+      let worst = 0;
+      for (let i = 0; i < 20 && !converged; i++) {
+        await new Promise((r) => setTimeout(r, 60));
+        const s = await e2e.evaluate(SNAPSHOT);
+        worst = Math.max(worst, s.keyboardInset);
+        converged = Math.abs(s.keyboardInset - 284) <= 2;
+      }
+      assert.ok(
+        converged,
+        `inset should converge on the honest 284 px after a mid-flight reading (max seen ${worst})`,
+      );
+      assert.ok(
+        worst <= 544,
+        `inset should never run past the interim reading's target (max ${worst})`,
+      );
+      assert.equal(
+        (await e2e.evaluate(SNAPSHOT)).promptInView,
+        true,
+        "prompt stays visible through the two-step keyboard move",
+      );
+
+      // The transcript is a driven, non-scrolling log (blue29/30): a touch
+      // drag over it must move the text via scrollTop while the page and
+      // the layout stay put, and the log must never leave its range (hard
+      // ends, no rubber band). A southward drag from the pinned bottom
+      // pulls toward the transcript's top; the emulated momentum then
+      // coasts on and must also stop inside the range.
+      const logBefore = await e2e.evaluate(SNAPSHOT);
+      await e2e.send("Input.synthesizeScrollGesture", {
+        x: 195,
+        y: 400, // mid-terminal
+        xDistance: 0,
+        yDistance: 160, // southward: toward the top of the transcript
+        gestureSourceType: "touch",
+        speed: 800,
+      });
+      await new Promise((r) => setTimeout(r, 700)); // momentum settles
+      const logAfter = await e2e.evaluate(SNAPSHOT);
+      assert.ok(
+        logAfter.screen.scrollTop < logBefore.screen.scrollTop,
+        `a drag over the transcript should drive the log (before=${logBefore.screen.scrollTop}, after=${logAfter.screen.scrollTop})`,
+      );
+      assert.ok(
+        logAfter.screen.scrollTop >= 0,
+        "the log's top edge is hard (never negative)",
+      );
+      assert.ok(
+        logAfter.screen.scrollTop <=
+          logAfter.screen.scrollHeight - logAfter.screen.clientHeight,
+        "the log's bottom edge is hard (never past its range)",
+      );
+      assert.equal(
+        logAfter.doc.pageScrolls,
+        false,
+        "a drag over the log must not scroll the page",
+      );
+      assert.equal(
+        logAfter.container.height,
+        logBefore.container.height,
+        "a drag over the log must not resize the terminal",
+      );
+      assert.equal(
+        logAfter.keyboardInset,
+        logBefore.keyboardInset,
+        "a drag over the log must not move the keyboard inset",
+      );
+
+      // The gate + driver make the log's bottom a HARD END for a
+      // northward drag (the "terminal not draggable north" contract,
+      // blue5's failure, blue14/15's gate): dragging up at the end with
+      // the keyboard open must neither move the page into WebKit's pan
+      // slack nor let the log rubber-band. The driver claims the move
+      // and clamps it to the end; the gate blocks the page pan.
+      await e2e.evaluate(`
+        const s = document.getElementById('screen');
+        s.scrollTop = s.scrollHeight;
+      `);
+      await new Promise((r) => setTimeout(r, 50));
+      const endBefore = await e2e.evaluate(SNAPSHOT);
+      const roomAtEnd = endBefore.screen.scrollHeight - endBefore.screen.clientHeight;
+      assert.equal(endBefore.screen.scrollTop, roomAtEnd, "log starts at its end");
+      await e2e.send("Input.synthesizeScrollGesture", {
+        x: 195,
+        y: 400, // mid-terminal
+        xDistance: 0,
+        yDistance: -180, // northward: against the hard end
+        gestureSourceType: "touch",
+        speed: 800,
+      });
+      await new Promise((r) => setTimeout(r, 700)); // momentum settles
+      const endAfter = await e2e.evaluate(SNAPSHOT);
+      assert.equal(
+        endAfter.screen.scrollTop,
+        roomAtEnd,
+        `a northward drag at the end must hold the hard end (before=${endBefore.screen.scrollTop}, after=${endAfter.screen.scrollTop})`,
+      );
+      assert.equal(
+        endAfter.doc.pageScrolls,
+        false,
+        "a northward drag over the log must not scroll the page",
+      );
+      assert.equal(
+        endAfter.container.height,
+        endBefore.container.height,
+        "a northward drag over the log must not resize the terminal",
+      );
+      assert.equal(
+        endAfter.keyboardInset,
+        endBefore.keyboardInset,
+        "a northward drag over the log must not move the keyboard inset",
+      );
+
       // Regression: with the keyboard open, a background drag must not
       // resize the terminal -- a panned main reads to the inset
       // measurement as "the keyboard moved" (the phantom-resize bug).

@@ -17,6 +17,8 @@ npx -y -p typescript@5.9.2 tsc \
     web/runner.worker.js \
     web/coi-serviceworker.js \
     web/terminal-input.js \
+    web/terminal-keyboard.js \
+    web/terminal-log.js \
     web/terminal-output.js \
     web/terminal-render.js \
     web/terminal-scroll.js \

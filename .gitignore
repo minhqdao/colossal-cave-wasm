@@ -12,6 +12,8 @@ node_modules/
 *.out
 *.exe
 
+keyboard-lab
+
 /adventure
 /adventure.js
 /adventure.wasm
