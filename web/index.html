@@ -166,17 +166,6 @@
            ends are hard by construction. */
         overflow: hidden;
         padding: 28px;
-        /* blue32: the only direction the browser may still handle over the
-           transcript is the one pull-to-refresh needs. Per MDN, pan-up is
-           the finger dragging DOWNWARD -- so every other gesture (reading
-           forward, reading back while the log still has room) is excluded
-           from the compositor up front, and the driver's preventDefault is
-           the only thing that can move anything. Without this the
-           compositor stays a candidate for the whole gesture and can latch
-           a drag to the document before the driver has claimed it.
-           pinch-zoom is kept: blocking it here would take two-finger zoom
-           away from the whole transcript. */
-        touch-action: pan-up pinch-zoom;
         text-shadow: 0 0 2px rgba(200, 248, 200, 0.35);
       }
       #terminal {

@@ -15,7 +15,7 @@ import {
   scrollTerminalToBottom,
 } from "./terminal-scroll.js";
 import {
-  decideLogOwner,
+  decideLogMove,
   decideLogWheel,
   drivenScrollTop,
   flickVelocity,
@@ -657,7 +657,7 @@ function pinScroll() {
 }
 window.addEventListener("scroll", pinScroll, { passive: true });
 
-// ================= the transcript driver (blue29/30/32) ==============
+// ================= the transcript driver (blue29/30) =================
 // The transcript is NOT a native scroller: #screen is overflow:hidden, so
 // it cannot rubber-band, cannot chain, and has no overscroll physics of
 // any kind -- no matter where a gesture starts (WebKit decides a gesture's
@@ -667,35 +667,21 @@ window.addEventListener("scroll", pinScroll, { passive: true });
 // ends are hard BY CONSTRUCTION. Momentum after a flick is emulated
 // (native momentum needs a scroller; this has none).
 //
-// A gesture's owner is settled ONCE and never revisited (blue32). "log"
-// preventDefaults every move of the gesture and drives the clamped
-// scrollTop; "page" never touches it, so the document -- sitting at
-// scroll 0 -- runs the browser's OWN pull-to-refresh.
-//
-// The per-move hand-off that used to live here assumed the browser would
-// take a gesture back mid-flight. WebKit does not, and politely stops the
-// log dead at its top; Blink does not either, but it also latches the
-// gesture to the document scroller the instant one touchmove is not
-// preventDefault-ed, after which every remaining move arrives with
-// cancelable = false and preventDefault is a silent no-op. So a drag that
-// began deep in the log scrolled the transcript and pulled the page's
-// refresh at the SAME time -- and whether the first move was still
-// cancelable at all varied with the log's offset, so the same drag only
-// misbehaved sometimes. Ownership is decided before the browser's touch
-// slop is crossed instead, which is before the browser has decided
-// anything, and then held for the whole gesture.
-//
-// The log therefore keeps a gesture it can no longer do anything with: a
-// drag that runs out of transcript stops dead at the hard end, with no
-// stretch and no hand-off. That is the abrupt stop iOS already had, now
-// on every platform -- and the next touch from the end is a full native
-// pull, which is what makes pull-to-refresh reachable at all.
-/** @type {"undecided" | "log" | "page"} */
-let logOwner = "undecided";
+// A southward drag that finds the log at its top is nobody's scroll: the
+// driver never preventDefaults those moves, so the document -- sitting at
+// scroll 0 -- runs the browser's OWN pull-to-refresh, keyboard open or
+// closed. A pull that arrives at the top mid-gesture keeps driving the
+// hard 0 through a small dead zone, then hands the gesture to the page
+// and LATCHES the hand-off: no re-driving that gesture, so the page pull
+// can never fight the log again. On iOS, which locks a touch to its first
+// scroll owner, such a pull stops dead -- abruptly, with no stretch; the
+// next touch from the top is a full native pull. That abrupt stop is the
+// accepted worst case.
 let logTouch = false;
 let logY0 = 0;
 let logTop0 = 0;
 let logDriven = false; // this gesture drove the log (a flick is possible)
+let logHandOff = false; // top arrival latched: the page owns the gesture
 let logMomentumRaf = 0;
 let logVelocity = 0;
 let logMomentumT0 = 0;
@@ -738,10 +724,10 @@ function logRelease() {
 }
 
 function logGestureEnd() {
-  if (logTouch && logDriven) logRelease();
-  logOwner = "undecided";
+  if (logTouch && logDriven && !logHandOff) logRelease();
   logTouch = false;
   logDriven = false;
+  logHandOff = false;
   logSamples.length = 0;
 }
 
@@ -750,11 +736,11 @@ screen.addEventListener(
   (e) => {
     logStopMomentum();
     logTouch = e.touches.length === 1;
-    logOwner = logTouch ? "undecided" : "page";
     if (!logTouch) return;
     logY0 = e.touches[0].clientY;
     logTop0 = Math.round(screen.scrollTop);
     logDriven = false;
+    logHandOff = false;
     logSamples.length = 0;
   },
   { passive: true },
@@ -766,33 +752,33 @@ screen.addEventListener(
     if (e.touches.length !== 1) {
       // Pinch or a second finger: hands off; the page can have it.
       logTouch = false;
-      logOwner = "page";
       logDriven = false;
+      logHandOff = false;
       logStopMomentum();
       return;
     }
     if (!logTouch) return;
     const dy = e.touches[0].clientY - logY0;
-    // Read the room fresh: the game may have appended output mid-drag.
+    const selection = window.getSelection();
     const room = logRoom();
-    if (logOwner === "undecided") {
-      const selection = window.getSelection();
-      logOwner = decideLogOwner({
-        dy,
-        top0: logTop0,
-        room,
-        selectionCollapsed: !selection || selection.isCollapsed,
-      });
+    const move = decideLogMove({
+      dy,
+      top0: logTop0,
+      room,
+      handOff: logHandOff,
+      selectionCollapsed: !selection || selection.isCollapsed,
+    });
+    if (move.action === "page") return;
+    e.preventDefault(); // the log consumes this move; the page must not
+    if (move.action === "top") {
+      screen.scrollTop = 0;
+      pinnedToBottom = false; // the user scrolled: release the keyboard glue
+      if (move.latch) logHandOff = true;
+      return;
     }
-    // "page" owns the gesture outright; "undecided" is still inside the
-    // slop, where nothing has moved and the browser has not committed
-    // either -- standing aside there keeps the page's pull-to-refresh
-    // available instead of foreclosing it on a tremor.
-    if (logOwner !== "log") return;
-    e.preventDefault(); // the log owns this gesture; the page must not move
-    pinnedToBottom = false; // the user scrolled: release the keyboard glue
     const target = drivenScrollTop({ top0: logTop0, dy, room });
     logDriven = true;
+    pinnedToBottom = false; // the user scrolled: release the keyboard glue
     screen.scrollTop = target;
     logSamples.push({ t: performance.now(), st: target });
     if (logSamples.length > 4) logSamples.shift();
@@ -803,39 +789,31 @@ screen.addEventListener(
 screen.addEventListener("touchend", logGestureEnd, { passive: true });
 screen.addEventListener("touchcancel", logGestureEnd, { passive: true });
 
-// Desktop: the wheel drives the same clamped path, and owns it while the
-// log has anywhere left to go (keyboard-lab blue32). A delta that merely
-// REACHES an end is consumed whole -- the log clamps, the surplus is
-// dropped, the page does not move -- so one swipe never walks the page
-// out from under the transcript; only a log ALREADY parked at the edge
-// hands the event to the browser to scroll the page natively. blue31
-// chained on the overshoot instead, which started the page the moment the
-// log came within one delta of its end: on a trackpad that is most of a
-// swipe, so scrolling the text also shifted the whole layout and left it
-// there, and reversing the wheel moved only the log. No scrollBy inside
-// the handler either way: on Safari, programmatic page scroll during
-// active wheel momentum fights the scrolling thread and the page wiggles.
-// Line/page delta modes are converted to pixels (decideLogWheel).
+// Desktop: wheel drives the same clamped path, and CHAINS the surplus to
+// the outer page once the log is spent (keyboard-lab blue31): while the
+// delta fits inside the log it is consumed here (preventDefault, log
+// scrolls, page stays); once the delta would overshoot past an end, the
+// log is clamped to the edge and the wheel event is NOT prevented -- the
+// browser scrolls the outer page natively with the surplus, the same
+// contract as the touch hand-off at the top on iOS. No scrollBy inside
+// the handler: on Safari, programmatic page scroll during active wheel
+// momentum fights the scrolling thread and the page wiggles. Line/page
+// delta modes are converted to pixels (decideLogWheel).
 screen.addEventListener(
   "wheel",
   (e) => {
     const room = logRoom();
     if (room <= 1) return; // short log: the wheel belongs to the page
-    const before = screen.scrollTop;
     const move = decideLogWheel({
       deltaY: e.deltaY,
       deltaMode: e.deltaMode,
-      scrollTop: before,
+      scrollTop: screen.scrollTop,
       room,
       pageHeight: window.innerHeight,
     });
-    // Only a log that actually moved stops following new output: a wheel
-    // spent at the end chains to the page and leaves the pin alone.
-    if (move.scrollTop !== before) {
-      pinnedToBottom = false; // the user scrolled: release the keyboard glue
-    }
+    pinnedToBottom = false; // the user scrolled: release the keyboard glue
     screen.scrollTop = move.scrollTop;
-    if (move.prevent) e.preventDefault(); // the log consumed it
+    if (move.prevent) e.preventDefault(); // the log consumed it all
   },
   { passive: false },
 );

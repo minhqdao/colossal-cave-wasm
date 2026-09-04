@@ -12,22 +12,14 @@
 // [0, room] and rounded to whole pixels on every write -- the ends are
 // hard BY CONSTRUCTION. What can be decided from numbers alone lives
 // here so it can be unit-tested without a browser.
-//
-// The contract both input paths share: the log has priority while it has
-// anywhere to go, and the page (default behavior, pull-to-refresh) takes
-// over only once the log is spent. A gesture's owner -- log or page -- is
-// settled once and never re-settled, because a browser will not reliably
-// hand a gesture back mid-flight (see decideLogOwner).
 
 /**
- * How far the finger must travel before the driver claims a gesture, px.
- * Below this the gesture is nobody's yet: the browser's own touch slop
- * (~8px on Android, ~10px on iOS) has not been crossed either, so no
- * native scroll has started and nothing is foreclosed. Claiming UNDER the
- * browser's slop is the point -- the driver latches the gesture before the
- * browser can.
+ * How far past the top (px) a pull must reach before the gesture is
+ * handed off to the page. Inside the zone the driver keeps writing the
+ * hard 0 and preventDefault-ing, so a trembling finger can neither
+ * flicker the page pull on and off nor flip between drive and hand-off.
  */
-export const GESTURE_SLOP_PX = 6;
+export const HANDOFF_DEAD_ZONE_PX = 6;
 
 /** Momentum cap, px per 16.667ms frame. */
 export const FLICK_MAX_VELOCITY = 48;
@@ -45,56 +37,45 @@ export const FLICK_DECAY = 0.88;
 export const FLICK_MAX_DT_MS = 48;
 
 /**
- * Who owns one touch gesture over the transcript. The owner is decided
- * ONCE, from the log's state at touchstart and the direction the finger
- * first commits to, and then never re-decided: "log" means the driver
- * preventDefaults every move of the gesture and writes the clamped
- * scrollTop; "page" means the driver never touches it and the browser
- * runs its own default (pull-to-refresh, at the top of the document).
- *
- * Deciding once is the whole fix (blue32). The previous per-move
- * classifier handed a gesture to the page the moment the log reached its
- * top mid-drag, which assumes the browser is still willing to take it --
- * true on iOS, where WebKit locks a touch to its first scroll owner, but
- * not on Android: Blink latches the gesture to the document scroller the
- * instant one touchmove is not preventDefault-ed, and once latched the
- * rest of the gesture arrives with cancelable = false, so preventDefault
- * is a no-op. A drag that started deep in the log then scrolled the
- * transcript AND pulled the page's refresh at the same time -- you could
- * not drag the transcript down without actuating pull-to-refresh. Worse,
- * whether the first move was still cancelable varied with the log's
- * scroll offset, so the same drag misbehaved only sometimes.
- *
- * "undecided" is the move still inside the slop: the direction is not
- * known, and nothing has moved, so the driver stands aside without
- * foreclosing the page.
+ * Classify one touchmove over the transcript. Everything that is not the
+ * log's scroll belongs to the page untouched ("page"): a latched hand-off
+ * (the page owns the rest of the gesture, period -- blue30's fix for the
+ * page pull fighting the log), a short log with nothing to scroll, an
+ * open text selection (a selection drag, not a scroll), and above all a
+ * southward pull that finds the log at its top -- nobody's scroll, so
+ * never preventDefault-ed and the document at scroll 0 runs Safari's own
+ * pull-to-refresh. "top" is a pull that ARRIVED at the top mid-gesture:
+ * the driver writes the hard 0 and keeps preventDefault-ing inside the
+ * dead zone; past the zone it hands the gesture to the page and LATCHES.
+ * "drive" is an ordinary follow: the caller writes the clamped target and
+ * preventDefaults so the page must not move.
  *
  * @param {{
  *   dy: number,
  *   top0: number,
  *   room: number,
+ *   handOff: boolean,
  *   selectionCollapsed: boolean,
- *   slopPx?: number,
+ *   handOffPx?: number,
  * }} s
- * @returns {"log" | "page" | "undecided"}
+ * @returns {{ action: "page" | "drive" } | { action: "top", latch: boolean }}
  */
-export function decideLogOwner({
+export function decideLogMove({
   dy,
   top0,
   room,
+  handOff,
   selectionCollapsed,
-  slopPx = GESTURE_SLOP_PX,
+  handOffPx = HANDOFF_DEAD_ZONE_PX,
 }) {
-  if (room <= 1) return "page"; // nothing to scroll: not ours at all
-  if (!selectionCollapsed) return "page"; // a selection drag, not a scroll
-  if (Math.abs(dy) < slopPx) return "undecided";
-  // South (finger down, reading back): ours while there is transcript
-  // above the viewport. Parked at the top it is nobody's scroll, so the
-  // document's own pull-to-refresh runs, from the first pixel.
-  if (dy > 0) return top0 > 0 ? "log" : "page";
-  // North (finger up, reading forward): ours while there is transcript
-  // below. Parked at the end, the page owns it.
-  return top0 < room ? "log" : "page";
+  if (handOff) return { action: "page" };
+  if (room <= 1) return { action: "page" };
+  if (!selectionCollapsed) return { action: "page" };
+  if (dy > 0 && top0 <= 0) return { action: "page" };
+  if (dy > 0 && top0 - dy <= 0) {
+    return { action: "top", latch: top0 - dy <= -handOffPx };
+  }
+  return { action: "drive" };
 }
 
 /**
@@ -184,27 +165,15 @@ export const WHEEL_LINE_PX = 16;
 
 /**
  * One wheel event's effect on the log, and whether the event must be
- * preventDefault-ed. The log has priority while it has anywhere to go: a
- * delta that merely REACHES an end is consumed whole (the log clamps, the
- * surplus is dropped) and the page stays put. Only once the log is
- * ALREADY parked at the edge it is being pushed against is the event left
- * alone for the browser to scroll the page with.
- *
- * blue31 chained on the overshoot instead -- "the delta did not fit, so
- * let the page have it" -- which meant the page started scrolling the
- * moment the log came within one delta of its end. On a trackpad that is
- * most of a single swipe, so scrolling the transcript also walked the
- * whole page out from under it and left it there: the log and the page
- * moved together, and reversing the wheel moved only the log while the
- * page stayed offset. Splitting the surplus properly is not available
- * either: it needs a programmatic page scroll inside the handler, which
- * fights the scrolling thread and wiggles harder (blue31's own note).
- * Dropping the surplus costs one extra notch before the page takes over
- * and buys a page that never moves while the log still can.
- *
- * Line/page delta modes are converted to pixels (page-mode needs the page
- * height) so the decision is in one unit. The returned scrollTop is a
- * whole pixel, like every other write into the log.
+ * preventDefault-ed. blue31's wheel contract: while the delta fits inside
+ * the log it is consumed here (prevent = true, log scrolls, page stays);
+ * once the delta would overshoot past an end, the log is clamped to the
+ * edge and the event is NOT prevented (prevent = false) -- the browser
+ * scrolls the outer page NATIVELY with the surplus, the same contract as
+ * the touch hand-off at the top on iOS. Line/page delta modes are
+ * converted to pixels (page-mode needs the page height) so the
+ * overshoot decision is in one unit. The returned scrollTop is a whole
+ * pixel, like every other write into the log.
  *
  * @param {{
  *   deltaY: number,
@@ -228,13 +197,9 @@ export function decideLogWheel({
       : deltaMode === 2
         ? deltaY * pageHeight
         : deltaY;
-  // The page gets it only when the log was spent BEFORE this event.
-  const spent =
-    room <= 1 ||
-    (dy > 0 && scrollTop >= room) ||
-    (dy < 0 && scrollTop <= 0);
+  const target = scrollTop + dy;
   return {
-    scrollTop: Math.round(Math.max(0, Math.min(room, scrollTop + dy))),
-    prevent: !spent,
+    scrollTop: Math.round(Math.max(0, Math.min(room, target))),
+    prevent: target >= 0 && target <= room,
   };
 }

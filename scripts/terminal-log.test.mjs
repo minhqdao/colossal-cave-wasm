@@ -3,17 +3,15 @@
 // classifier, the wheel decision, the flick velocity, and the momentum step
 // take plain numbers so the log's contract can be driven deterministically:
 //
-//   - a gesture's owner is settled ONCE, from the log's state at
-//     touchstart and the direction the finger commits to, and then held:
-//     the log keeps a gesture until it runs out of transcript, the page
-//     gets the ones the log cannot use (blue32's fix for the Android
-//     drag that actuated pull-to-refresh while also scrolling the log);
+//   - a southward pull that finds the log at its top is the PAGE's
+//     (native pull-to-refresh), from the first pixel or latched after a
+//     mid-gesture arrival past the dead zone;
 //   - everything the log drives is clamped to [0, room] and rounded to
 //     whole pixels, so the ends are hard by construction (no rubber band,
 //     from a drag, a flick, or a wheel, from any starting position);
-//   - a wheel is consumed while the log has anywhere left to go, and
-//     reaches the page only once the log is ALREADY parked at the edge it
-//     is being pushed against (blue32; blue31 chained on the overshoot).
+//   - a wheel delta that would overshoot past an end is NOT
+//     preventDefault-ed: the surplus chains to the outer page natively
+//     (blue31).
 //
 //   node --test scripts/terminal-log.test.mjs
 
@@ -23,70 +21,109 @@ import test from "node:test";
 import {
   FLICK_DECAY,
   FLICK_MAX_VELOCITY,
-  GESTURE_SLOP_PX,
+  HANDOFF_DEAD_ZONE_PX,
   WHEEL_LINE_PX,
-  decideLogOwner,
+  decideLogMove,
   decideLogWheel,
   drivenScrollTop,
   flickVelocity,
   momentumStep,
 } from "../web/terminal-log.js";
 
-/** A southward pull that started mid-log, with room above it. */
-const PULL = { dy: 100, top0: 200, room: 400, selectionCollapsed: true };
+/** A southward pull arriving at the top from a mid-log start. */
+const ARRIVAL = { dy: 100, top0: 50, room: 400, handOff: false, selectionCollapsed: true };
 
-test("decideLogOwner: an ordinary mid-log drag belongs to the log, either way", () => {
-  // South: reading back, there is transcript above.
-  assert.equal(decideLogOwner({ ...PULL }), "log");
-  // North: reading forward, there is transcript below.
-  assert.equal(decideLogOwner({ ...PULL, dy: -100 }), "log");
+test("decideLogMove: a latched hand-off is never re-driven", () => {
+  // blue30: once the page owns the gesture it owns it, period -- no
+  // flip-flopping between drive and hand-off while the finger trembles.
+  assert.deepEqual(
+    decideLogMove({ ...ARRIVAL, handOff: true }),
+    { action: "page" },
+  );
+  // Even a move that would drive deep into the log.
+  assert.deepEqual(
+    decideLogMove({ dy: -80, top0: 0, room: 400, handOff: true, selectionCollapsed: true }),
+    { action: "page" },
+  );
 });
 
-test("decideLogOwner: the log keeps a gesture it is about to run out of", () => {
-  // blue32: a pull that will reach the top mid-gesture still belongs to
-  // the log. Handing it to the page there is what let Blink latch the
-  // gesture to the document and run pull-to-refresh against a log that
-  // was still scrolling.
-  assert.equal(decideLogOwner({ dy: 100, top0: 50, room: 400, selectionCollapsed: true }), "log");
-  // Even a single move that would overshoot the top by a mile: the log
-  // clamps it and keeps the gesture.
-  assert.equal(decideLogOwner({ dy: 500, top0: 300, room: 400, selectionCollapsed: true }), "log");
-  // Same at the other end.
-  assert.equal(decideLogOwner({ dy: -500, top0: 100, room: 400, selectionCollapsed: true }), "log");
-});
-
-test("decideLogOwner: a log parked at the edge hands that direction to the page", () => {
-  // At the top, pulling south is nobody's scroll: the browser's own
-  // pull-to-refresh runs, from the first decisive pixel.
-  assert.equal(decideLogOwner({ dy: 100, top0: 0, room: 400, selectionCollapsed: true }), "page");
-  // At the end, pushing north has nothing left to show.
-  assert.equal(decideLogOwner({ dy: -100, top0: 400, room: 400, selectionCollapsed: true }), "page");
-  // Parked at one edge only blocks the direction it is spent in: from the
-  // top you can still read forward, from the end you can still read back.
-  assert.equal(decideLogOwner({ dy: -100, top0: 0, room: 400, selectionCollapsed: true }), "log");
-  assert.equal(decideLogOwner({ dy: 100, top0: 400, room: 400, selectionCollapsed: true }), "log");
-});
-
-test("decideLogOwner: a move inside the slop decides nothing", () => {
-  // The direction is not known yet, and nothing has moved, so the driver
-  // stands aside -- and does not foreclose the page's pull-to-refresh by
-  // preventDefault-ing a tremor.
-  for (const dy of [0, 1, -1, GESTURE_SLOP_PX - 1, -(GESTURE_SLOP_PX - 1)]) {
-    assert.equal(decideLogOwner({ ...PULL, dy }), "undecided", `dy=${dy}`);
-  }
-  // The first move past the slop is the one that decides.
-  assert.equal(decideLogOwner({ ...PULL, dy: GESTURE_SLOP_PX }), "log");
-  assert.equal(decideLogOwner({ ...PULL, dy: -GESTURE_SLOP_PX }), "log");
-});
-
-test("decideLogOwner: a short log is the page's", () => {
+test("decideLogMove: a short log is the page's", () => {
   // Nothing to scroll: the driver stands aside entirely.
-  assert.equal(decideLogOwner({ ...PULL, room: 1 }), "page");
-  assert.equal(decideLogOwner({ dy: -40, top0: 0, room: 0, selectionCollapsed: true }), "page");
+  assert.deepEqual(
+    decideLogMove({ ...ARRIVAL, room: 1 }),
+    { action: "page" },
+  );
+  assert.deepEqual(
+    decideLogMove({ dy: -40, top0: 0, room: 0, handOff: false, selectionCollapsed: true }),
+    { action: "page" },
+  );
 });
 
-test("decideLogOwner: a selection drag is not a scroll", () => {
-  assert.equal(decideLogOwner({ ...PULL, selectionCollapsed: false }), "page");
+test("decideLogMove: a selection drag is not a scroll", () => {
+  assert.deepEqual(
+    decideLogMove({ ...ARRIVAL, selectionCollapsed: false }),
+    { action: "page" },
+  );
+});
+
+test("decideLogMove: a pull that BEGAN at the top is the page's from the first pixel", () => {
+  // The log is at its top and the finger moves south: nobody's scroll --
+  // never preventDefault-ed, so Safari's own pull-to-refresh runs.
+  assert.deepEqual(
+    decideLogMove({ dy: 3, top0: 0, room: 400, handOff: false, selectionCollapsed: true }),
+    { action: "page" },
+  );
+  assert.deepEqual(
+    decideLogMove({ dy: 200, top0: 0, room: 400, handOff: false, selectionCollapsed: true }),
+    { action: "page" },
+  );
+});
+
+test("decideLogMove: a northward drag from the top drives back into the log", () => {
+  assert.deepEqual(
+    decideLogMove({ dy: -30, top0: 0, room: 400, handOff: false, selectionCollapsed: true }),
+    { action: "drive" },
+  );
+});
+
+test("decideLogMove: a pull arriving at the top stays hard inside the dead zone", () => {
+  // top0 - dy == 0 exactly (dy 50 from top0 50): the hard 0, no latch yet.
+  assert.deepEqual(
+    decideLogMove({ ...ARRIVAL, dy: 50 }),
+    { action: "top", latch: false },
+  );
+  // One px inside the zone: still driven.
+  assert.deepEqual(
+    decideLogMove({ ...ARRIVAL, dy: 50 + HANDOFF_DEAD_ZONE_PX - 1 }),
+    { action: "top", latch: false },
+  );
+  // Past the zone: the gesture is handed to the page and LATCHED.
+  assert.deepEqual(
+    decideLogMove({ ...ARRIVAL, dy: 50 + HANDOFF_DEAD_ZONE_PX }),
+    { action: "top", latch: true },
+  );
+  // A fast pull from deep in the log can hand off on its first move.
+  assert.deepEqual(
+    decideLogMove({ dy: 500, top0: 300, room: 400, handOff: false, selectionCollapsed: true }),
+    { action: "top", latch: true },
+  );
+});
+
+test("decideLogMove: an ordinary mid-log move drives", () => {
+  assert.deepEqual(
+    decideLogMove({ dy: 40, top0: 200, room: 400, handOff: false, selectionCollapsed: true }),
+    { action: "drive" },
+  );
+  assert.deepEqual(
+    decideLogMove({ dy: -40, top0: 200, room: 400, handOff: false, selectionCollapsed: true }),
+    { action: "drive" },
+  );
+  // A zero-delta first move already belongs to the log: it must not let
+  // the gesture leak to the page before the direction is known.
+  assert.deepEqual(
+    decideLogMove({ dy: 0, top0: 200, room: 400, handOff: false, selectionCollapsed: true }),
+    { action: "drive" },
+  );
 });
 
 test("drivenScrollTop: clamped to [0, room] and whole-pixel", () => {
@@ -102,7 +139,7 @@ test("drivenScrollTop: clamped to [0, room] and whole-pixel", () => {
   assert.equal(drivenScrollTop({ top0: 10, dy: -10.37, room: 400 }), 20);
 });
 
-// --- the wheel (blue32: consumed until the log is spent) --------------------
+// --- the wheel (blue31: surplus chains to the outer page) -------------------
 test("decideLogWheel: a delta that fits inside the log is consumed", () => {
   assert.deepEqual(
     decideLogWheel({ deltaY: 50, scrollTop: 100, room: 400 }),
@@ -119,45 +156,17 @@ test("decideLogWheel: a delta that fits inside the log is consumed", () => {
   );
 });
 
-test("decideLogWheel: a delta that REACHES an end is consumed whole", () => {
-  // blue32: the surplus is dropped, not chained. blue31 handed the event
-  // to the page here, which started the page the moment the log came
-  // within one delta of its end -- on a trackpad that is most of a swipe,
-  // so scrolling the transcript shifted the whole layout with it.
+test("decideLogWheel: an overshoot clamps the log and chains to the page", () => {
+  // Past the end: the log lands exactly on the edge, and the event is NOT
+  // prevented -- the browser scrolls the outer page with the surplus.
   assert.deepEqual(
     decideLogWheel({ deltaY: 30, scrollTop: 390, room: 400 }),
-    { scrollTop: 400, prevent: true },
-  );
-  // Same at the top, scrolling back up.
-  assert.deepEqual(
-    decideLogWheel({ deltaY: -30, scrollTop: 5, room: 400 }),
-    { scrollTop: 0, prevent: true },
-  );
-  // A delta orders of magnitude bigger than the room is still the log's.
-  assert.deepEqual(
-    decideLogWheel({ deltaY: 900, scrollTop: 10, room: 400 }),
-    { scrollTop: 400, prevent: true },
-  );
-});
-
-test("decideLogWheel: a log parked at the edge hands the wheel to the page", () => {
-  // The log was spent BEFORE this event, so the page can have it.
-  assert.deepEqual(
-    decideLogWheel({ deltaY: 30, scrollTop: 400, room: 400 }),
     { scrollTop: 400, prevent: false },
   );
+  // Past the top (scrolling back up): same contract, other end.
   assert.deepEqual(
-    decideLogWheel({ deltaY: -30, scrollTop: 0, room: 400 }),
+    decideLogWheel({ deltaY: -30, scrollTop: 5, room: 400 }),
     { scrollTop: 0, prevent: false },
-  );
-  // Parked at one edge only spends that direction.
-  assert.deepEqual(
-    decideLogWheel({ deltaY: -30, scrollTop: 400, room: 400 }),
-    { scrollTop: 370, prevent: true },
-  );
-  assert.deepEqual(
-    decideLogWheel({ deltaY: 30, scrollTop: 0, room: 400 }),
-    { scrollTop: 30, prevent: true },
   );
 });
 
@@ -180,30 +189,22 @@ test("decideLogWheel: line-mode deltas are converted to pixels", () => {
     decideLogWheel({ deltaY: 3, deltaMode: 1, scrollTop: 50, room: 400 }),
     { scrollTop: 50 + 3 * WHEEL_LINE_PX, prevent: true },
   );
-  // The conversion decides where the log lands, not the raw notch count:
-  // 30 lines is 480px, which is past the top and clamps the log there.
+  // The conversion decides the overshoot, not the raw notch count.
   assert.deepEqual(
     decideLogWheel({ deltaY: -30, deltaMode: 1, scrollTop: 10, room: 400 }),
-    { scrollTop: 0, prevent: true },
-  );
-  // A notch that cannot move the log at all (already parked) is the
-  // page's, exactly like a pixel delta.
-  assert.deepEqual(
-    decideLogWheel({ deltaY: -1, deltaMode: 1, scrollTop: 0, room: 400 }),
     { scrollTop: 0, prevent: false },
   );
 });
 
 test("decideLogWheel: page-mode deltas are converted to pixels", () => {
-  // deltaMode 2 (Page Down/Up): one page = the viewport height. A page
-  // swallows the whole log, so it is consumed and the page stays put.
+  // deltaMode 2 (Page Down/Up): one page = the viewport height.
   assert.deepEqual(
     decideLogWheel({ deltaY: 1, deltaMode: 2, scrollTop: 300, room: 800, pageHeight: 844 }),
-    { scrollTop: 800, prevent: true },
+    { scrollTop: 800, prevent: false },
   );
   assert.deepEqual(
     decideLogWheel({ deltaY: -1, deltaMode: 2, scrollTop: 100, room: 800, pageHeight: 844 }),
-    { scrollTop: 0, prevent: true },
+    { scrollTop: 0, prevent: false },
   );
 });
 
