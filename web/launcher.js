@@ -245,6 +245,21 @@ const iosLike =
   /iP(hone|o(d|ad))/.test(navigator.userAgent) ||
   (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
+// Android Chrome gets a native transcript scroller (see the CSS override
+// for html[data-adventure-log="native"]): Blink latches a gesture to the
+// document scroller the instant one touchmove is not preventDefault-ed,
+// so a JS driver racing the compositor on a heavy transcript
+// intermittently loses -- and the lost race actuates pull-to-refresh in
+// the middle of the log. A native scroller scrolls, chains to the page
+// and PTRs by itself, correctly, with no race to lose. iOS keeps the
+// driven log (blue29/30): perfect there, untouched here. UA-gated like
+// iosLike above -- the measured pan/resize mode is only known after a
+// keyboard opens, but scrolling must behave from the first gesture.
+const androidLike = /Android/.test(navigator.userAgent);
+if (androidLike) {
+  document.documentElement.dataset.adventureLog = "native";
+}
+
 function loadStoredKeyboardHeight() {
   try {
     return Number(localStorage.getItem(KEYBOARD_HEIGHT_KEY)) || 0;
@@ -669,7 +684,8 @@ window.addEventListener("scroll", pinScroll, { passive: true });
 // momentum needs a scroller; this has none). Outside the shell (desktop,
 // touch laptops) the transcript is a native scroller again and the
 // driver stands aside entirely -- see the touchmove/wheel gates below --
-// so the browser scrolls and chains by itself, as before 9dea85f. One
+// so the browser scrolls and chains by itself, as before 9dea85f. (Android
+// inside the shell is native as well: see androidLike above.) One
 // writer per platform: driving over a native scroller fought the
 // scrolling thread and left the page nervous.
 //
@@ -768,6 +784,14 @@ screen.addEventListener(
     // the page by itself: stand aside so the browser runs the gesture
     // instead of driving over it.
     if (!usesFixedShell.matches) return;
+    // Android inside the shell is native too (see androidLike above): a
+    // preventDefault here would only race the compositor -- and losing
+    // that race is what actuated pull-to-refresh mid-log. Still release
+    // the keyboard glue: the user took the transcript over.
+    if (androidLike) {
+      pinnedToBottom = false;
+      return;
+    }
     const dy = e.touches[0].clientY - logY0;
     const selection = window.getSelection();
     const room = logRoom();

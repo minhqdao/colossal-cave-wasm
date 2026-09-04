@@ -166,6 +166,14 @@
         padding: 28px;
         text-shadow: 0 0 2px rgba(200, 248, 200, 0.35);
       }
+      /* Android only (launcher.js sets the attribute): native transcript
+         there too, for the same reason as desktop -- the browser owns the
+         gesture, chains a spent end to the page and runs pull-to-refresh
+         at the top by itself, with no preventDefault race to lose. iOS
+         keeps overflow hidden (blue29/30) and the driven log. */
+      html[data-adventure-log="native"] #screen {
+        overflow-y: auto;
+      }
       #terminal {
         color: inherit;
         font: inherit;
