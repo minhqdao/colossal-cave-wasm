@@ -253,18 +253,37 @@
          unlike every other engine -- will not stretch a flex-item
          <button> up to match. The row then shows two heights, with the
          link's content riding high in its taller box. Laying the link out
-         as a flex row instead removes line-box math for the label+icon
-         unit by construction (order and the 6px gap are unchanged) and
-         centers it, so both controls land on the shared 32px floor. The
-         floor (not a fixed height) is untouched, so wrapped labels still
-         grow the border. @supports (-webkit-touch-callout: none) matches
-         iOS only: desktop Safari, Android Chrome and Firefox do not
-         implement it, so every other platform renders exactly as before. */
+         as a centered flex row removes line-box math for the label+icon
+         unit by construction (order and the 6px gap are unchanged); but
+         WebKit still computes the flex frame from that same inflated line
+         box, so the link lands a hair taller than the flat button's floor.
+         The link's box is therefore PINNED to the shared 32px floor: with
+         box-sizing: border-box that leaves a 30px content box exactly
+         filled by the 30px line-height -- the same geometry the button
+         produces from its line-height + min-height, so the two controls
+         are equal by construction no matter what WebKit thinks the content
+         is worth. Pinning the LINK alone cannot reintroduce the wrap
+         problem min-height exists for (ace4b50): its label "Source" stays
+         on one line even at the narrowest screen, while the button keeps
+         min-height and still grows its border when a label wraps. The svg
+         is pinned to its true 8px box and kept out of flex negotiation
+         (flex: none) so no engine can let it push the frame either. The
+         box pin, the svg pin and the flex centering together guarantee an
+         iOS link exactly as tall as the button. @supports
+         (-webkit-touch-callout: none) matches iOS only: desktop Safari,
+         Android Chrome and Firefox do not implement it, so every other
+         platform renders exactly as before. */
       @supports (-webkit-touch-callout: none) {
         .terminal-actions a {
           align-items: center;
           display: inline-flex;
+          height: 32px;
           justify-content: center;
+        }
+        .terminal-actions a svg {
+          flex: none;
+          height: 8px;
+          width: 8px;
         }
       }
       button {
