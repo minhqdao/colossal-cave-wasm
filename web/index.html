@@ -156,15 +156,13 @@
         font: inherit;
         height: 100%;
         line-height: 1.2;
-        /* blue29/30: the transcript is NOT a native scroller. A
-           non-scroller has no overscroll physics at all -- nothing to
-           rubber-band, nothing to chain, no matter where a gesture starts
-           (WebKit decides a gesture's overscroll up front, so
-           overscroll-behavior could not cover a drag that ARRIVES at an
-           edge mid-gesture). scrollTop still works programmatically: the
-           touch/wheel driver in launcher.js is the only writer, and the
-           ends are hard by construction. */
-        overflow: hidden;
+        /* Desktop: the transcript is a plain native scroller. Wheel and
+           touch gestures scroll it natively, and a spent end chains to
+           the outer page by itself -- the pre-9dea85f contract. The touch
+           shell below overrides this with overflow hidden, where the
+           JS-driven log (blue29/30, iOS rubber-band fixes) owns every
+           write instead. */
+        overflow-y: auto;
         padding: 28px;
         text-shadow: 0 0 2px rgba(200, 248, 200, 0.35);
       }
@@ -365,6 +363,18 @@
              a short landscape screen plus keyboard does not overflow. */
           flex: 1 1 0;
           min-height: 120px;
+        }
+        #screen {
+          /* blue29/30: here the transcript is NOT a native scroller. A
+             non-scroller has no overscroll physics at all -- nothing to
+             rubber-band, nothing to chain, no matter where a gesture
+             starts (WebKit decides a gesture's overscroll up front, so
+             overscroll-behavior could not cover a drag that ARRIVES at an
+             edge mid-gesture). scrollTop still works programmatically:
+             the touch driver in launcher.js is the only writer, and the
+             ends are hard by construction. Desktop keeps the native
+             scroller from the base rule above. */
+          overflow: hidden;
         }
         #terminal-input {
           /* Stays pinned to the container's TOP edge like on desktop (the

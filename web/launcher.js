@@ -658,14 +658,20 @@ function pinScroll() {
 window.addEventListener("scroll", pinScroll, { passive: true });
 
 // ================= the transcript driver (blue29/30) =================
-// The transcript is NOT a native scroller: #screen is overflow:hidden, so
-// it cannot rubber-band, cannot chain, and has no overscroll physics of
-// any kind -- no matter where a gesture starts (WebKit decides a gesture's
-// overscroll up front, so overscroll-behavior could not cover a drag that
-// ARRIVES at an edge mid-gesture; blue26-28 shipped the evidence). All log
-// movement is driven here, clamped and pixel-rounded on every write: the
-// ends are hard BY CONSTRUCTION. Momentum after a flick is emulated
-// (native momentum needs a scroller; this has none).
+// Inside the touch shell the transcript is NOT a native scroller:
+// #screen is overflow:hidden there, so it cannot rubber-band, cannot
+// chain, and has no overscroll physics of any kind -- no matter where a
+// gesture starts (WebKit decides a gesture's overscroll up front, so
+// overscroll-behavior could not cover a drag that ARRIVES at an edge
+// mid-gesture; blue26-28 shipped the evidence). All log movement is
+// driven here, clamped and pixel-rounded on every write: the ends are
+// hard BY CONSTRUCTION. Momentum after a flick is emulated (native
+// momentum needs a scroller; this has none). Outside the shell (desktop,
+// touch laptops) the transcript is a native scroller again and the
+// driver stands aside entirely -- see the touchmove/wheel gates below --
+// so the browser scrolls and chains by itself, as before 9dea85f. One
+// writer per platform: driving over a native scroller fought the
+// scrolling thread and left the page nervous.
 //
 // A southward drag that finds the log at its top is nobody's scroll: the
 // driver never preventDefaults those moves, so the document -- sitting at
@@ -758,6 +764,10 @@ screen.addEventListener(
       return;
     }
     if (!logTouch) return;
+    // Off the touch shell the transcript scrolls natively and chains to
+    // the page by itself: stand aside so the browser runs the gesture
+    // instead of driving over it.
+    if (!usesFixedShell.matches) return;
     const dy = e.touches[0].clientY - logY0;
     const selection = window.getSelection();
     const room = logRoom();
@@ -789,19 +799,18 @@ screen.addEventListener(
 screen.addEventListener("touchend", logGestureEnd, { passive: true });
 screen.addEventListener("touchcancel", logGestureEnd, { passive: true });
 
-// Desktop: wheel drives the same clamped path, and CHAINS the surplus to
-// the outer page once the log is spent (keyboard-lab blue31): while the
-// delta fits inside the log it is consumed here (preventDefault, log
-// scrolls, page stays); once the delta would overshoot past an end, the
-// log is clamped to the edge and the wheel event is NOT prevented -- the
-// browser scrolls the outer page natively with the surplus, the same
-// contract as the touch hand-off at the top on iOS. No scrollBy inside
-// the handler: on Safari, programmatic page scroll during active wheel
+// Desktop and touch laptops: the transcript is a native scroller (see the
+// base #screen rule), so wheel gestures scroll it natively and a spent end
+// chains to the outer page by itself -- the pre-9dea85f contract. The
+// driver below runs only inside the touch shell, where the transcript is
+// not a scroller and every write is emulated. No scrollBy inside the
+// handler: on Safari, programmatic page scroll during active wheel
 // momentum fights the scrolling thread and the page wiggles. Line/page
 // delta modes are converted to pixels (decideLogWheel).
 screen.addEventListener(
   "wheel",
   (e) => {
+    if (!usesFixedShell.matches) return; // native scroll + native chain
     const room = logRoom();
     if (room <= 1) return; // short log: the wheel belongs to the page
     const move = decideLogWheel({
