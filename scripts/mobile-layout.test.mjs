@@ -130,9 +130,16 @@ const VIEWPORT_STUB = `
  * dispatchTouchEvent goes through the real input pipeline on every
  * platform.
  * @param {object} e2e the CDP client from startChromeE2E
- * @param {{ x: number, y: number, dx?: number, dy: number, steps?: number, stepMs?: number }} opts
+ * @param {{ x: number, y: number, dx?: number, dy: number, steps?: number, stepMs?: number, settleMs?: number }} opts
+ *   settleMs holds the finger still at the end for a few frames, which
+ *   zeroes the release velocity: the emulated flick then never launches
+ *   and the log's final position is the drag's alone, not the drag's plus
+ *   however far momentum decided to coast.
  */
-async function touchDrag(e2e, { x, y, dx = 0, dy, steps = 8, stepMs = 16 }) {
+async function touchDrag(
+  e2e,
+  { x, y, dx = 0, dy, steps = 8, stepMs = 16, settleMs = 0 },
+) {
   await e2e.send("Input.dispatchTouchEvent", {
     type: "touchStart",
     touchPoints: [{ x, y, id: 1, radiusX: 1, radiusY: 1, force: 1 }],
@@ -152,6 +159,17 @@ async function touchDrag(e2e, { x, y, dx = 0, dy, steps = 8, stepMs = 16 }) {
       ],
     });
     if (stepMs) await new Promise((r) => setTimeout(r, stepMs));
+  }
+  if (settleMs) {
+    for (let i = 0; i < 3; i++) {
+      await e2e.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [
+          { x: x + dx, y: y + dy, id: 1, radiusX: 1, radiusY: 1, force: 1 },
+        ],
+      });
+      await new Promise((r) => setTimeout(r, settleMs));
+    }
   }
   await e2e.send("Input.dispatchTouchEvent", {
     type: "touchEnd",
@@ -431,12 +449,13 @@ test(
         "a drag over the log must not move the keyboard inset",
       );
 
-      // The gate + driver make the log's bottom a HARD END for a
-      // northward drag (the "terminal not draggable north" contract,
-      // blue5's failure, blue14/15's gate): dragging up at the end with
-      // the keyboard open must neither move the page into WebKit's pan
-      // slack nor let the log rubber-band. The driver claims the move
-      // and clamps it to the end; the gate blocks the page pan.
+      // The log's bottom is a HARD END for a northward drag (the
+      // "terminal not draggable north" contract, blue5's failure,
+      // blue14/15's gate): dragging up at the end with the keyboard open
+      // must neither move the page into WebKit's pan slack nor let the
+      // log rubber-band. The log is spent in that direction, so the
+      // gesture is the page's from the start (blue32) and the log simply
+      // never moves; the gate still blocks the page pan.
       await e2e.evaluate(`
         const s = document.getElementById('screen');
         s.scrollTop = s.scrollHeight;
@@ -598,6 +617,356 @@ test(
           `${g.name}: --pad-y must not retune (tall=${tall.padY}, short=${short.padY})`,
         );
       }
+    } finally {
+      e2e.close();
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// The transcript's scroll contract (blue32): the log owns a gesture while it
+// has anywhere to go, and the page -- whose only native gesture left is
+// pull-to-refresh -- gets the ones the log is already spent in. Ownership is
+// settled once, at the start of the gesture, and held for the rest of it.
+//
+// Headless Chrome cannot drive native touch scrolling at all (a document
+// with a 1688px scroll range never budges), so the touch half is asserted
+// from what the driver CAN be seen to do: whether it drove the log at all.
+// That is the ownership decision itself, made observable. The wheel half is
+// asserted on defaultPrevented, which the harness does report faithfully.
+// ---------------------------------------------------------------------------
+
+/** Boot the game and run enough turns for the transcript to overflow. */
+async function bootWithOverflowingLog(e2e) {
+  assert.ok(
+    await waitUntil(async () => {
+      try {
+        const out = await e2e.evaluate(
+          "document.getElementById('output').textContent || ''",
+        );
+        return /WELCOME TO ADVENTURE/.test(out);
+      } catch {
+        return false;
+      }
+    }, 180, 500),
+    "game reached first output",
+  );
+  const type = async (cmd) => {
+    assert.ok(
+      await waitUntil(
+        () => e2e.evaluate("window.adventureDebug.state.waitingForInput"),
+        60,
+        150,
+      ),
+      `prompt visible before command "${cmd}"`,
+    );
+    await e2e.send("Input.insertText", { text: cmd });
+    await new Promise((r) => setTimeout(r, 120));
+    for (const eventType of ["keyDown", "keyUp"]) {
+      await e2e.send("Input.dispatchKeyEvent", {
+        type: eventType,
+        key: "Enter",
+        code: "Enter",
+        windowsVirtualKeyCode: 13,
+        nativeVirtualKeyCode: 13,
+      });
+    }
+    await new Promise((r) => setTimeout(r, 450));
+  };
+  for (const cmd of ["Y", "LOOK", "LOOK", "LOOK", "LOOK", "LOOK", "LOOK"]) {
+    await type(cmd);
+  }
+  const room = await e2e.evaluate(
+    "(() => { const s = document.getElementById('screen'); return s.scrollHeight - s.clientHeight; })()",
+  );
+  assert.ok(room > 200, `transcript should overflow to scroll (room=${room})`);
+  return room;
+}
+
+test(
+  "transcript touch gestures: the log owns a drag while it has room, the page owns the spent ones",
+  { skip: skipReason, timeout: 120_000 },
+  async () => {
+    const e2e = await startChromeE2E({
+      chrome: CHROME,
+      port: port + 2,
+      serve: "web",
+      debugPort: 9740 + (process.pid % 200),
+      profilePrefix: "colossal-cave-gesture-profile",
+    });
+    try {
+      await e2e.send("Page.enable");
+      await e2e.send("Emulation.setDeviceMetricsOverride", {
+        width: 390,
+        height: 844,
+        deviceScaleFactor: 2,
+        mobile: true,
+      });
+      await e2e.send("Emulation.setTouchEmulationEnabled", {
+        enabled: true,
+        maxTouchPoints: 5,
+      });
+      await e2e.send("Page.navigate", { url: `http://localhost:${port + 2}/` });
+
+      const room = await bootWithOverflowingLog(e2e);
+      const box = await e2e.evaluate(
+        `(() => { const b = document.getElementById('screen').getBoundingClientRect(); return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) }; })()`,
+      );
+
+      const setTop = (st) =>
+        e2e.evaluate(
+          `(() => { const s = document.getElementById('screen'); s.scrollTop = ${st}; return s.scrollTop; })()`,
+        );
+      const readTop = async () => {
+        await new Promise((r) => setTimeout(r, 250));
+        return e2e.evaluate(
+          `(() => Math.round(document.getElementById('screen').scrollTop))()`,
+        );
+      };
+
+      // A drag with room in its direction is the log's: it follows the
+      // finger and stops hard at the end it runs into, and the page and
+      // the layout never move with it.
+      for (const [label, start, dy] of [
+        ["reading back from mid-log", Math.round(room / 2), 120],
+        ["reading forward from mid-log", Math.round(room / 2), -120],
+      ]) {
+        await setTop(start);
+        const before = await e2e.evaluate(SNAPSHOT);
+        await touchDrag(e2e, {
+          x: box.x,
+          y: box.y,
+          dy,
+          steps: 10,
+          stepMs: 16,
+          settleMs: 90,
+        });
+        const st = await readTop();
+        const after = await e2e.evaluate(SNAPSHOT);
+        assert.ok(
+          dy > 0 ? st < start : st > start,
+          `${label}: the log should follow the finger (start=${start}, after=${st})`,
+        );
+        assert.ok(
+          st >= 0 && st <= room,
+          `${label}: the ends stay hard (got ${st}, room ${room})`,
+        );
+        assert.equal(
+          after.doc.pageScrolls,
+          before.doc.pageScrolls,
+          `${label}: must not scroll the page`,
+        );
+        assert.equal(
+          after.container.height,
+          before.container.height,
+          `${label}: must not resize the terminal`,
+        );
+      }
+
+      // A gesture the log is ALREADY spent in belongs to the page, so the
+      // log must not be driven at all: pulling down at the top is how
+      // pull-to-refresh is reached, and pushing up at the end has nothing
+      // left to show.
+      for (const [label, start, dy] of [
+        ["a pull that starts at the top", 0, 160],
+        ["a push that starts at the end", room, -160],
+      ]) {
+        await setTop(start);
+        await touchDrag(e2e, {
+          x: box.x,
+          y: box.y,
+          dy,
+          steps: 10,
+          stepMs: 16,
+          settleMs: 90,
+        });
+        const st = await readTop();
+        assert.equal(
+          st,
+          start,
+          `${label}: is the page's, so the log must stay put (start=${start}, after=${st})`,
+        );
+      }
+
+      // The log keeps a gesture it runs out of mid-flight, instead of
+      // handing it to the page: from one third down, pull past the top
+      // and then push back without lifting. The old per-move hand-off
+      // latched on the arrival and left the log frozen at 0 for the rest
+      // of the gesture, so the second half of this drag did nothing.
+      await setTop(Math.round(room / 3));
+      await e2e.send("Input.dispatchTouchEvent", {
+        type: "touchStart",
+        touchPoints: [{ x: box.x, y: box.y, id: 1, radiusX: 1, radiusY: 1, force: 1 }],
+      });
+      const leg = async (from, to, steps) => {
+        for (let i = 1; i <= steps; i++) {
+          const y = from + ((to - from) * i) / steps;
+          await e2e.send("Input.dispatchTouchEvent", {
+            type: "touchMove",
+            touchPoints: [{ x: box.x, y, id: 1, radiusX: 1, radiusY: 1, force: 1 }],
+          });
+          await new Promise((r) => setTimeout(r, 16));
+        }
+      };
+      await leg(box.y, box.y + Math.round(room / 3) + 60, 10); // past the top
+      const atTop = await e2e.evaluate(
+        `Math.round(document.getElementById('screen').scrollTop)`,
+      );
+      assert.equal(atTop, 0, `the pull should park the log at its top (got ${atTop})`);
+      await leg(box.y + Math.round(room / 3) + 60, box.y + 60, 10); // back down
+      for (let i = 0; i < 3; i++) {
+        await e2e.send("Input.dispatchTouchEvent", {
+          type: "touchMove",
+          touchPoints: [
+            { x: box.x, y: box.y + 60, id: 1, radiusX: 1, radiusY: 1, force: 1 },
+          ],
+        });
+        await new Promise((r) => setTimeout(r, 90));
+      }
+      await e2e.send("Input.dispatchTouchEvent", {
+        type: "touchEnd",
+        touchPoints: [],
+      });
+      const reversed = await readTop();
+      assert.ok(
+        reversed > 20,
+        `the log must re-drive after reaching its top in one gesture (got ${reversed})`,
+      );
+    } finally {
+      e2e.close();
+    }
+  },
+);
+
+test(
+  "transcript wheel: consumed while the log has room, handed over once it is spent",
+  { skip: skipReason, timeout: 120_000 },
+  async () => {
+    const e2e = await startChromeE2E({
+      chrome: CHROME,
+      port: port + 3,
+      serve: "web",
+      debugPort: 9760 + (process.pid % 200),
+      profilePrefix: "colossal-cave-wheel-profile",
+    });
+    try {
+      await e2e.send("Page.enable");
+      await e2e.send("Emulation.setDeviceMetricsOverride", {
+        width: 1440,
+        height: 720,
+        deviceScaleFactor: 1,
+        mobile: false,
+      });
+      // Recorded on window (bubble), so it runs after the log's own
+      // handler and defaultPrevented reports the driver's decision.
+      await e2e.send("Page.addScriptToEvaluateOnNewDocument", {
+        source: `
+          window.__wheels = [];
+          window.addEventListener('wheel', (e) => {
+            const s = document.getElementById('screen');
+            window.__wheels.push({
+              deltaY: e.deltaY,
+              prevented: e.defaultPrevented,
+              st: s.scrollTop,
+              page: document.documentElement.scrollTop,
+            });
+          }, { passive: true });
+        `,
+      });
+      await e2e.send("Page.navigate", { url: `http://localhost:${port + 3}/` });
+
+      const room = await bootWithOverflowingLog(e2e);
+      const box = await e2e.evaluate(
+        `(() => { const b = document.getElementById('screen').getBoundingClientRect(); return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) }; })()`,
+      );
+
+      const wheelAt = async (start, deltaY, times) => {
+        await e2e.evaluate(
+          `(() => { const s = document.getElementById('screen'); s.scrollTop = ${start}; window.__wheels = []; return true; })()`,
+        );
+        await new Promise((r) => setTimeout(r, 120));
+        for (let i = 0; i < times; i++) {
+          await e2e.send("Input.dispatchMouseEvent", {
+            type: "mouseWheel",
+            x: box.x,
+            y: box.y,
+            deltaX: 0,
+            deltaY,
+          });
+          await new Promise((r) => setTimeout(r, 90));
+        }
+        return e2e.evaluate(`window.__wheels`);
+      };
+
+      // While the log has room the wheel is consumed: it scrolls the
+      // transcript and leaves the page exactly where it was.
+      let events = await wheelAt(Math.round(room / 2), 40, 3);
+      assert.equal(events.length, 3, "every wheel should have been recorded");
+      for (const e of events) {
+        assert.equal(
+          e.prevented,
+          true,
+          `a wheel with room left must be consumed (deltaY=${e.deltaY})`,
+        );
+      }
+      assert.ok(
+        events[events.length - 1].st > Math.round(room / 2),
+        `the log should have scrolled (got ${events[events.length - 1].st})`,
+      );
+      assert.equal(
+        events[events.length - 1].page,
+        0,
+        "the page must not move while the log still has room",
+      );
+
+      // A delta that REACHES an end is still consumed whole -- the log
+      // clamps, the surplus is dropped, and the page stays put. blue31
+      // handed these to the page, which is what walked the layout out
+      // from under the transcript mid-swipe.
+      const shortOfEnd = room - 15;
+      events = await wheelAt(shortOfEnd, 40, 1);
+      assert.equal(
+        events[0].prevented,
+        true,
+        "a delta that merely reaches the end must still be consumed",
+      );
+      assert.equal(events[0].st, room, "the log lands exactly on its end");
+      assert.equal(events[0].page, 0, "and the page must not move with it");
+
+      // Only a log parked at the edge before the event is spent: those
+      // reach the page, which is what makes the outer page scrollable at
+      // all once the transcript has nothing left to show.
+      events = await wheelAt(room, 40, 2);
+      for (const e of events) {
+        assert.equal(
+          e.prevented,
+          false,
+          "a wheel against a log already parked at its end is the page's",
+        );
+      }
+      events = await wheelAt(0, -40, 2);
+      for (const e of events) {
+        assert.equal(
+          e.prevented,
+          false,
+          "a wheel against a log already parked at its top is the page's",
+        );
+      }
+
+      // Spending one end does not spend the other: parked at the end, a
+      // wheel back up is the log's again.
+      events = await wheelAt(room, -40, 2);
+      for (const e of events) {
+        assert.equal(
+          e.prevented,
+          true,
+          "reading back from the end must be consumed by the log",
+        );
+      }
+      assert.ok(
+        events[events.length - 1].st < room,
+        "the log should have scrolled back up",
+      );
     } finally {
       e2e.close();
     }
