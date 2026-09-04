@@ -248,6 +248,25 @@
         padding: 0 20px;
         text-align: center;
       }
+      /* iOS only: WebKit sizes the Source link's inline line box (label +
+         baseline-standing svg) a touch taller than the button's, and --
+         unlike every other engine -- will not stretch a flex-item
+         <button> up to match. The row then shows two heights, with the
+         link's content riding high in its taller box. Laying the link out
+         as a flex row instead removes line-box math for the label+icon
+         unit by construction (order and the 6px gap are unchanged) and
+         centers it, so both controls land on the shared 32px floor. The
+         floor (not a fixed height) is untouched, so wrapped labels still
+         grow the border. @supports (-webkit-touch-callout: none) matches
+         iOS only: desktop Safari, Android Chrome and Firefox do not
+         implement it, so every other platform renders exactly as before. */
+      @supports (-webkit-touch-callout: none) {
+        .terminal-actions a {
+          align-items: center;
+          display: inline-flex;
+          justify-content: center;
+        }
+      }
       button {
         --button-transition: 0.18s ease-out;
         -webkit-appearance: none;
