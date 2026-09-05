@@ -69,11 +69,11 @@ Start the game from the repository root. The executable looks for `adventure.dat
 
 ### Prebuilt Artifacts
 
-`web/adventure.js` and `web/adventure.wasm` are committed for convenience, allowing you to run the web version without installing the toolchain. They were built with LFortran 0.65.0 and Emscripten 6.0.8, embedding the game database directly in the WebAssembly module.
+`web/adventure.js` and `web/adventure.wasm` are committed for convenience, allowing you to run the web version without installing the toolchain. They were built with LFortran 0.65.0 and Emscripten 6.0.9, embedding the game database directly in the WebAssembly module.
 
 ### Local WebAssembly Build
 
-The WebAssembly build requires [LFortran](https://lfortran.org/) and [Emscripten](https://emscripten.org/). Install both and make sure `lfortran` and `emcc` are on your `PATH`. The build is known to work with LFortran 0.65.0 and Emscripten 6.0.8; other recent versions should work as well.
+The WebAssembly build requires [LFortran](https://lfortran.org/) and [Emscripten](https://emscripten.org/). Install both and make sure `lfortran` and `emcc` are on your `PATH`. The build is known to work with LFortran 0.65.0 and Emscripten 6.0.9; other recent versions should work as well.
 
 ```bash
 scripts/build-web.sh
