@@ -36,34 +36,21 @@ Platform shims (in `src/adventure_shims.f`): `IFILE` locates and opens `adventur
 
 ## Native Build
 
-Install `gfortran`, `lfortran`, or `flang`. Other compilers may work as well but have not been tested.
-
-### gfortran
+Requires `gfortran`, `lfortran`, or `flang`; other compilers may work but have not been tested.
 
 ```bash
+# gfortran
 gfortran src/adventure.f src/adventure_shims.f -o adventure
-```
 
-### lfortran
-
-LFortran emits identical helper symbols for both source files, causing linker conflicts when they are compiled separately. Combine them into a single compilation unit:
-
-```bash
+# lfortran (single compilation unit: both files emit identical helper symbols)
 mkdir -p build && cat src/adventure.f src/adventure_shims.f > build/adventure_all.f
 lfortran --fixed-form --implicit-interface --implicit-typing build/adventure_all.f -o adventure
-```
 
-### flang
-
-```bash
+# flang
 flang src/adventure.f src/adventure_shims.f -o adventure
 ```
 
-Start the game from the repository root. The executable looks for `adventure.dat` in the working directory and then in `src/`:
-
-```bash
-./adventure
-```
+Run the game from the repository root with `./adventure`. The executable looks for `adventure.dat` in the working directory and then in `src/`.
 
 ## WebAssembly Build
 
