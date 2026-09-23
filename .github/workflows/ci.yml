@@ -98,6 +98,17 @@ jobs:
       - name: Mobile layout (headless Chrome)
         run: node --test scripts/mobile-layout.test.mjs
 
+      - name: WASM smoke test (committed artifacts)
+        run: |
+          node scripts/headless-test.mjs web/adventure.js Y LOOK | tee output.txt
+          grep -q "WELCOME TO ADVENTURE" output.txt
+          grep -q "YOU ARE STANDING AT THE END OF A ROAD" output.txt
+
+      - name: WASM smoke test (committed artifacts, movement)
+        run: |
+          node scripts/headless-test.mjs web/adventure.js Y IN | tee move_output.txt
+          grep -q "YOU ARE INSIDE A BUILDING" move_output.txt
+
   build-wasm:
     runs-on: ubuntu-latest
     steps:
