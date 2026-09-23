@@ -42,7 +42,7 @@ import {
   maxInputLength,
   readInputLine,
   writeInputLine,
-} from "../web/runner-protocol.js";
+} from "terminal-shell/protocol";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const wasmPath = `${root}web/adventure.js`;
@@ -87,8 +87,6 @@ const DEPRESSION =
   "DIRT IS A STRONG STEEL GRATE MOUNTED IN CONCRETE.";
 const DEBRIS =
   "YOU ARE IN A DEBRIS ROOM, FILLED WITH STUFF WASHED IN FROM THE SURFACE.";
-const BIRD_ROOM =
-  "YOU ARE IN A SPLENDID CHAMBER THIRTY FEET HIGH.";
 const PITCH_BLACK =
   "IT IS NOW PITCH BLACK. IF YOU PROCEED YOU WILL LIKELY FALL INTO A PIT.";
 const PIT_FALL = "YOU FELL INTO A PIT AND BROKE EVERY BONE IN YOUR BODY!";
@@ -695,7 +693,7 @@ function resolveNativeBinary() {
   const gfortran = spawnSync("gfortran", ["--version"], { encoding: "utf8" });
   if (gfortran.status !== 0) return null;
 
-  let needsBuild = true;
+  let needsBuild;
   try {
     const binaryTime = statSync(nativeBinary).mtimeMs;
     needsBuild = sources.some((path) => statSync(path).mtimeMs > binaryTime);
