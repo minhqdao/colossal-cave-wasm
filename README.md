@@ -59,7 +59,7 @@ soft-keyboard handling) lives in the [terminal-shell](https://www.npmjs.com/pack
 npm package; this launcher is host glue only (worker lifecycle, isolation
 recovery, status, restart).
 
-Prebuilt `web/adventure.js` and `web/adventure.wasm` (LFortran 0.65.0, Emscripten 6.0.9) are committed, so you can run the web version without a toolchain, embedding the game database directly in the WebAssembly module; CI rebuilds them for each deployment. To rebuild them yourself, install [LFortran](https://lfortran.org/) and [Emscripten](https://emscripten.org/), make sure both are on your `PATH`, and run:
+Prebuilt `web/adventure.js` and `web/adventure.wasm` (LFortran 0.65.0, Emscripten 6.0.10) are committed, so you can run the web version without a toolchain, embedding the game database directly in the WebAssembly module; CI rebuilds them for each deployment. To rebuild them yourself, install [LFortran](https://lfortran.org/) and [Emscripten](https://emscripten.org/), make sure both are on your `PATH`, and run:
 
 ```bash
 npm run build:wasm
