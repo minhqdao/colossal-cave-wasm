@@ -4,6 +4,8 @@
 [![Play online](https://img.shields.io/website?url=https%3A%2F%2Fminhqdao.github.io%2Fcolossal-cave-wasm%2F&logo=webassembly&label=play%20online)](https://minhqdao.github.io/colossal-cave-wasm/)
 [![License](https://img.shields.io/github/license/minhqdao/colossal-cave-wasm)](LICENSE)
 
+[![Demo of the game running in the browser](docs/demo.gif)](https://minhqdao.github.io/colossal-cave-wasm/)
+
 Colossal Cave Adventure is a foundational text adventure game, originally written in FORTRAN IV by Will Crowther in 1976 and expanded by Don Woods in 1977.
 
 This project is based on the 1977-03-31 sources, preserved together with the game database `adventure.dat` in the [adventure](https://github.com/wh0am1-dev/adventure) repository.
