@@ -6,15 +6,15 @@
 
 Colossal Cave Adventure is a foundational text adventure game, originally written in FORTRAN IV by Will Crowther in 1976 and expanded by Don Woods in 1977.
 
-The code is based on the 1977-03-31 sources, preserved together with the game database `adventure.dat` in the [wh0am1-dev/adventure](https://github.com/wh0am1-dev/adventure) repository.
+This project is based on the 1977-03-31 sources, preserved together with the game database `adventure.dat` in the [adventure](https://github.com/wh0am1-dev/adventure) repository.
 
-The goal of this project is to explore Fortran-to-WebAssembly compilation using modern Fortran compilers such as LFortran and LLVM Flang. The game is built with LFortran and Emscripten and runs entirely in the browser — [play it online](https://minhqdao.github.io/colossal-cave-wasm/).
+The goal is to explore Fortran-to-WebAssembly compilation using modern Fortran compilers such as LFortran and LLVM Flang. The game is currently built with LFortran and Emscripten and runs entirely in the browser.
 
 ## Changes to the 1977 Source
 
 <details> <summary>Show</summary>
 
-The port keeps the original program structure, statements and data statements; only what modern compilers reject was changed:
+The port keeps the original program structure, statements, and data statements. Only changes required by modern compilers were made:
 
 - `DO n` loops terminated by an assignment now terminate on a labeled `CONTINUE`.
 - `TYPE` statements became `PRINT`.
@@ -36,7 +36,7 @@ Platform shims (in `src/adventure_shims.f`): `IFILE` locates and opens `adventur
 
 ## Native Build
 
-Requires `gfortran`, `lfortran`, or `flang`; other compilers may work but have not been tested.
+Tested with `gfortran`, `lfortran`, and `flang`.
 
 ```bash
 # gfortran
@@ -54,41 +54,40 @@ Run the game from the repository root with `./adventure`. The executable looks f
 
 ## WebAssembly Build
 
-The browser terminal (transcript, command line with IME support, scrolling,
-soft-keyboard handling) lives in the [terminal-shell](https://www.npmjs.com/package/terminal-shell)
-npm package; this launcher is host glue only (worker lifecycle, isolation
-recovery, status, restart).
+Prebuilt `web/adventure.js` and `web/adventure.wasm` are committed, so no toolchain is needed to run the web version. CI rebuilds them for each deployment.
 
-Prebuilt `web/adventure.js` and `web/adventure.wasm` (LFortran 0.65.0, Emscripten 6.0.10) are committed, so you can run the web version without a toolchain, embedding the game database directly in the WebAssembly module; CI rebuilds them for each deployment. To rebuild them yourself, install [LFortran](https://lfortran.org/) and [Emscripten](https://emscripten.org/), make sure both are on your `PATH`, and run:
+To rebuild them locally, install [LFortran](https://lfortran.org/) and [Emscripten](https://emscripten.org/), make sure both are on your `PATH`, and run:
 
 ```bash
 npm run build:wasm
-```
+````
 
-> Web builds stay on LFortran 0.65.x (pinned in CI): 0.66.0 regressed sequential stdin reads on the wasm target (only the first input line is ever consumed, so every session quits right after it — see the follow-up to lfortran/lfortran#12654).
+> Web builds use LFortran 0.65.0. LFortran 0.66.0 currently breaks sequential stdin reads on WebAssembly.
 
-To play locally, start the included web server and open http://localhost:8080:
+To run locally:
 
 ```bash
 npm run dev
 ```
 
-### Deployment
+Then open [http://localhost:8080](http://localhost:8080).
 
-Every push to `main` is checked and deployed to GitHub Pages automatically via GitHub Actions — there is nothing to release by hand. The published site is a bundled, self-contained build of the game, so each update goes live as one consistent deploy.
+## Deployment
+
+Every push to `main` is checked and deployed to GitHub Pages automatically via GitHub Actions.
 
 ## Checks
 
-Run the test suite, the browser smoke tests and the typecheck with:
+Run the test suite, browser smoke tests, and typecheck with:
 
 ```bash
-npm run all
+npm run verify
 ```
 
 The test suite runs scripted game sessions against the WebAssembly build and checks their transcripts against a native gfortran build. `--no-parity` skips the native comparison, and a test name can be passed to run a subset of scenarios.
 
 ## License
 
-The original FORTRAN source of Colossal Cave Adventure was written by Will Crowther (1976) and extended by Don Woods (1977). It was distributed without a license notice and is widely treated as public domain. The source in this repository was obtained from [wh0am1-dev/adventure](https://github.com/wh0am1-dev/adventure); this repository makes no copyright claim on the original game source or its database file.
+The original FORTRAN source of Colossal Cave Adventure was written by Will Crowther (1976) and extended by Don Woods (1977). It was distributed without a license notice and is widely treated as public domain. The source in this repository was obtained from the [adventure](https://github.com/wh0am1-dev/adventure) repository. This repository makes no copyright claim on the original game source or its database file.
 
-All additions in this repository — the source patches, runtime shims (`IFILE`, `ADVRAN`, `GETLIN`/`NXTINT`), build scripts, web launcher and CI — are licensed under the [MIT License](LICENSE).
+All additions in this repository — the source patches, runtime shims (`IFILE`, `ADVRAN`, `GETLIN`/`NXTINT`), build scripts, web launcher, and CI — are licensed under the [MIT License](LICENSE).
