@@ -57,17 +57,13 @@ Run the game from the repository root with `./adventure`. The executable looks f
 
 Prebuilt `web/adventure.js` and `web/adventure.wasm` are committed, so no toolchain is needed to run the web version. CI rebuilds them for each deployment.
 
-To rebuild them locally, install [LFortran](https://lfortran.org/) (>= 0.69.0) and [Emscripten](https://emscripten.org/) 7.0.0, make sure `lfortran` and `emcc` are on your `PATH`, and run:
+To rebuild them locally, install [LFortran](https://lfortran.org/) (>= 0.69.0) and [Emscripten](https://emscripten.org/), make sure `lfortran` and `emcc` are on your `PATH`, and run:
 
 ```bash
 npm run build:wasm
 ```
 
-The script resolves `EMSDK_PATH` from `EMSDK` or shims a plain `emcc` on `PATH`, and concatenates both sources into one compilation unit — with separate units LFortran's implicit interfaces produce a WASM module that does not validate.
-
-> Tested with LFortran 0.69.0 and Emscripten 7.0.0. If you encounter build issues, try using these versions.
-
-To run locally:
+Run locally:
 
 ```bash
 npm run dev
