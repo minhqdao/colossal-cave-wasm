@@ -44,9 +44,8 @@ Tested with `gfortran`, `lfortran`, and `flang`.
 # gfortran
 gfortran src/adventure.f src/adventure_shims.f -o adventure
 
-# lfortran (single compilation unit: both files emit identical helper symbols)
-mkdir -p build && cat src/adventure.f src/adventure_shims.f > build/adventure_all.f
-lfortran --fixed-form --implicit-interface --implicit-typing build/adventure_all.f -o adventure
+# lfortran (>= 0.68.0)
+lfortran --fixed-form --implicit-interface --implicit-typing src/adventure.f src/adventure_shims.f -o adventure
 
 # flang
 flang src/adventure.f src/adventure_shims.f -o adventure
@@ -58,13 +57,15 @@ Run the game from the repository root with `./adventure`. The executable looks f
 
 Prebuilt `web/adventure.js` and `web/adventure.wasm` are committed, so no toolchain is needed to run the web version. CI rebuilds them for each deployment.
 
-To rebuild them locally, install [LFortran](https://lfortran.org/) and [Emscripten](https://emscripten.org/), make sure both are on your `PATH`, and run:
+To rebuild them locally, install [LFortran](https://lfortran.org/) (>= 0.69.0) and [Emscripten](https://emscripten.org/) 7.0.0, make sure `lfortran` and `emcc` are on your `PATH`, and run:
 
 ```bash
 npm run build:wasm
-````
+```
 
-> Tested with LFortran 0.67.0 from conda-forge. If you encounter build issues, try using this version.
+The script resolves `EMSDK_PATH` from `EMSDK` or shims a plain `emcc` on `PATH`, and concatenates both sources into one compilation unit — with separate units LFortran's implicit interfaces produce a WASM module that does not validate.
+
+> Tested with LFortran 0.69.0 and Emscripten 7.0.0. If you encounter build issues, try using these versions.
 
 To run locally:
 

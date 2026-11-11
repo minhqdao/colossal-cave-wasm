@@ -33,7 +33,7 @@
 //     chain scan (label 9007); the port fixes that hang (see 5302 in
 //     src/adventure.f), so the sequence is now covered by a test.
 
-import { statSync } from "node:fs";
+import { mkdirSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { runNative, runWasm, normalize } from "./game-driver.mjs";
@@ -702,13 +702,10 @@ function resolveNativeBinary() {
   }
 
   if (needsBuild) {
-    const concat = spawnSync("sh", ["-c",
-      `cat src/adventure.f src/adventure_shims.f > build/adventure_all.f`],
-      { cwd: root, encoding: "utf8" });
-    if (concat.status !== 0) process.exit(1);
+    mkdirSync(`${root}build`, { recursive: true });
     const build = spawnSync("gfortran", [
       "-O0", "-fno-align-commons",
-      "-o", nativeBinary, "build/adventure_all.f",
+      "-o", nativeBinary, "src/adventure.f", "src/adventure_shims.f",
     ], { cwd: root, encoding: "utf8" });
     if (build.status !== 0) {
       console.error(`gfortran failed:\n${build.stderr}`);
